@@ -1121,8 +1121,6 @@ def home():
     prediction = None
     confidence = None
     selection = {"risk": "Medium", "sentiment": "Neutral"}
-    home_metrics = build_home_metrics()
-    evaluation = get_evaluation()
 
     if request.method == "POST":
         risk = request.form.get("risk", "Medium")
@@ -1137,11 +1135,8 @@ def home():
         prediction=prediction,
         confidence=confidence,
         selection=selection,
-        home_metrics=home_metrics,
         risks=RISK_LEVELS,
         sentiments=SENTIMENT_LEVELS,
-        evaluation=evaluation,
-        dataset_path=str(get_base_dataset_path().relative_to(BASE_DIR)) if get_base_dataset_path().exists() else None,
     )
 
 
@@ -1289,6 +1284,11 @@ def live_data():
         response["cache"] = "stale" if market_cache["data"] is not None else "empty"
         response["route_error"] = str(exc)
         return jsonify(response)
+    
+    
+@app.route("/api/home-metrics")
+def api_home_metrics():
+    return jsonify(build_home_metrics())
 
 
 

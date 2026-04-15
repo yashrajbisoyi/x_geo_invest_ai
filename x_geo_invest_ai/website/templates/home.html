@@ -186,8 +186,13 @@
             .catch(function(){});
     }
 
-    updateDatasetSummary(true);
-    setInterval(function(){ updateDatasetSummary(true); }, 120000);
+    setTimeout(function(){
+        updateDatasetSummary(false);
+    }, 1000);
+
+    setInterval(function(){
+        updateDatasetSummary(false);
+    }, 120000);
 })();
 </script>
 
@@ -378,7 +383,7 @@ function fetchMarketData() {
         });
 }
 
-fetchMarketData();
+setTimeout(fetchMarketData, 1500);
 setInterval(fetchMarketData, 30000);
 
 document.getElementById("marketDebugToggle").addEventListener("click", function(){
