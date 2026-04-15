@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero">
+    <p class="eyebrow">Pipeline health</p>
+    <h1>Performance</h1>
+    <p class="lede">Dataset consistency and ML model evaluation outputs from the training workflow.</p>
+    {% if metrics.evaluation_dataset_path %}
+    <p class="meta">Active training dataset: <code>{{ metrics.evaluation_dataset_path }}</code>{% if metrics.trained_at %} · trained at {{ metrics.trained_at }}{% endif %}</p>
+    {% endif %}
+    <div class="print-controls" style="margin-top:16px">
+        <button type="button" class="secondary-button" id="printPdfBtn">Print PDF</button>
+    </div>
+</section>
+
+{% if metrics.total_articles %}
+<section class="stats-row">
+    <article class="stat-card" data-count="{{ metrics.total_articles }}" data-suffix="">
+        <span>Processed articles</span>
+        <strong>{{ metrics.total_articles }}</strong>
+    </article>
+    <article class="stat-card" data-count="{{ metrics.combo_count }}" data-suffix="">
+        <span>Unique input combinations</span>
+        <strong>{{ metrics.combo_count }}</strong>
+    </article>
+    <article class="stat-card" data-count="{{ metrics.combo_consistency }}" data-suffix="%">
+        <span>Combination consistency</span>
+        <strong>{{ metrics.combo_consistency }}%</strong>
+    </article>
+</section>
+
+<section class="result-grid">
+    <article class="result">
+        <h2>Most common recommendation</h2>
+        {% if metrics.top_recommendation %}
+        <p class="highlight">{{ metrics.top_recommendation.label }}</p>
+        <p>Appears in <strong>{{ metrics.top_recommendation.count }}</strong> dataset rows.</p>
+        {% else %}
+        <p>No recommendation summary available.</p>
+        {% endif %}
+    </article>
+
+    <article class="result">
+        <h2>Best model</h2>
+        {% if metrics.best_model %}
+        <p class="highlight">{{ metrics.best_model | replace("_"," ") | title }}</p>
+        <div style="margin-top:14px">
+            <p class="meta" style="margin-bottom:6px">Accuracy</p>
+            <div style="background:rgba(109,94,252,0.12);border-radius:99px;height:10px;overflow:hidden">
+                <div class="perf-bar" data-pct="{{ (metrics.accuracy * 100) | round | int }}"
+                     style="height:100%;width:0%;background:linear-gradient(90deg,#6d5efc,#ff4f8b);border-radius:99px;transition:width 1.2s cubic-bezier(.4,0,.2,1)"></div>
+            </div>
+            <p style="font-size:13px;margin-top:4px;color:var(--accent-2);font-weight:600">{{ (metrics.accuracy * 100) | round(1) }}%</p>
+        </div>
+        <div style="margin-top:12px">
+            <p class="meta" style="margin-bottom:6px">Weighted F1</p>
+            <div style="background:rgba(109,94,252,0.12);border-radius:99px;height:10px;overflow:hidden">
+                <div class="perf-bar" data-pct="{{ (metrics.f1_weighted * 100) | round | int }}"
+                     style="height:100%;width:0%;background:linear-gradient(90deg,#0f9f6e,#6d5efc);border-radius:99px;transition:width 1.2s cubic-bezier(.4,0,.2,1)"></div>
+            </div>
+            <p style="font-size:13px;margin-top:4px;color:var(--success);font-weight:600">{{ (metrics.f1_weighted * 100) | round(1) }}%</p>
+        </div>
+        {% else %}
+        <p>Run <code>python ml_model.py</code> to generate model evaluation artifacts.</p>
+        {% endif %}
+    </article>
+
+    <article class="result">
+        <h2>Execution time</h2>
+        {% if metrics.training_time_seconds is not none %}
+        <div style="display:flex;flex-direction:column;gap:14px;margin-top:8px">
+            <div>
+                <p class="meta">Training</p>
+                <p style="font-size:1.6rem;font-weight:700;color:var(--accent-2)">{{ metrics.training_time_seconds }}s</p>
+            </div>
+            <div>
+                <p class="meta">Prediction</p>
+                <p style="font-size:1.6rem;font-weight:700;color:var(--success)">{{ metrics.prediction_time_seconds }}s</p>
+            </div>
+        </div>
+        {% else %}
+        <p>Execution timing will appear after the training workflow runs.</p>
+        {% endif %}
+    </article>
+
+    <article class="result">
+        <h2>Model comparison</h2>
+        {% if metrics.model_comparison %}
+        <div style="display:flex;flex-direction:column;gap:14px;margin-top:6px">
+            {% for model in metrics.model_comparison %}
+            <div>
+                <p style="font-weight:700;font-size:13px;margin-bottom:4px">{{ model.name | replace("_"," ") | title }}</p>
+                <div style="display:flex;gap:10px;font-size:12px;color:var(--muted)">
+                    <span>Accuracy: <strong style="color:var(--accent-2)">{{ (model.accuracy * 100)|round(1) }}%</strong></span>
+                    <span>F1: <strong style="color:var(--success)">{{ (model.f1_weighted * 100)|round(1) }}%</strong></span>
+                    <span>Train: <strong>{{ model.training_time_seconds }}s</strong></span>
+                </div>
+                <div style="background:rgba(109,94,252,0.10);border-radius:99px;height:6px;margin-top:6px;overflow:hidden">
+                    <div class="perf-bar" data-pct="{{ (model.accuracy * 100)|round|int }}"
+                         style="height:100%;width:0%;background:linear-gradient(90deg,#6d5efc,#9d8fff);border-radius:99px;transition:width 1.2s cubic-bezier(.4,0,.2,1)"></div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p>No model comparison available yet.</p>
+        {% endif %}
+    </article>
+
+    <article class="result result-wide">
+        <h2>Confusion matrix</h2>
+        {% if metrics.confusion_matrix_url %}
+        <p class="meta" style="margin-bottom:12px">How the current best model separates recommendation classes on the evaluation split.</p>
+        <a href="{{ metrics.confusion_matrix_url }}" target="_blank" rel="noopener noreferrer" style="display:block">
+            <img src="{{ metrics.confusion_matrix_url }}" alt="Confusion matrix"
+                 style="width:100%;border-radius:16px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04)">
+        </a>
+        {% else %}
+        <p>Run <code>python ml_model.py</code> to generate the confusion matrix artifact.</p>
+        {% endif %}
+    </article>
+
+    <article class="result result-wide">
+        <h2>Suggested improvements</h2>
+        {% if metrics.improvement_notes %}
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
+            {% for note in metrics.improvement_notes %}
+            <div style="display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-radius:12px;background:rgba(109,94,252,0.07);border:1px solid rgba(109,94,252,0.15)">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0;margin-top:2px">
+                    <circle cx="8" cy="8" r="6.5" stroke="#6d5efc" stroke-width="1.4"/>
+                    <path d="M8 5v4M8 11v.5" stroke="#6d5efc" stroke-width="1.4" stroke-linecap="round"/>
+                </svg>
+                <p style="color:var(--text);font-size:14px">{{ note }}</p>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p>Improvement notes will appear after training runs.</p>
+        {% endif %}
+    </article>
+</section>
+
+<script>
+(function(){
+    var printBtn = document.getElementById("printPdfBtn");
+    if (printBtn) {
+        printBtn.addEventListener("click", function() {
+            window.print();
+        });
+    }
+
+    var cards = document.querySelectorAll(".stat-card[data-count]");
+    function animateCount(card) {
+        var target = parseInt(card.getAttribute("data-count"), 10);
+        var suffix = card.getAttribute("data-suffix") || "";
+        var el = card.querySelector("strong");
+        if (!el) return;
+        var startTime = null;
+        function step(ts) {
+            if (!startTime) startTime = ts;
+            var p = Math.min((ts - startTime) / 1400, 1);
+            var ease = 1 - Math.pow(1 - p, 3);
+            el.textContent = Math.round(target * ease) + suffix;
+            if (p < 1) requestAnimationFrame(step);
+        }
+        requestAnimationFrame(step);
+    }
+    var obs = new IntersectionObserver(function(entries){
+        entries.forEach(function(e){
+            if (e.isIntersecting && !e.target.classList.contains("counted")) {
+                e.target.classList.add("counted");
+                animateCount(e.target);
+            }
+        });
+    }, { threshold: 0.4 });
+    cards.forEach(function(c){ obs.observe(c); });
+
+    var bars = document.querySelectorAll(".perf-bar");
+    var barObs = new IntersectionObserver(function(entries){
+        entries.forEach(function(e){
+            if (e.isIntersecting && !e.target.classList.contains("animated")) {
+                e.target.classList.add("animated");
+                var pct = parseInt(e.target.getAttribute("data-pct"), 10);
+                e.target.style.width = pct + "%";
+            }
+        });
+    }, { threshold: 0.3 });
+    bars.forEach(function(b){ barObs.observe(b); });
+})();
+</script>
+
+<style>
+@media print {
+    .ticker-bar,
+    .navbar,
+    .page-orb,
+    .theme-toggle,
+    .print-controls,
+    #toast-container {
+        display: none !important;
+    }
+
+    body,
+    .container {
+        background: white !important;
+        color: black !important;
+    }
+
+    .container {
+        max-width: none !important;
+        padding: 0 !important;
+    }
+
+    .hero,
+    .result,
+    .stat-card {
+        background: white !important;
+        border: 1px solid #d9d9e3 !important;
+        box-shadow: none !important;
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+
+    .hero h1,
+    .result h2,
+    .highlight,
+    strong,
+    p,
+    span,
+    .meta {
+        color: black !important;
+    }
+
+    .perf-bar {
+        width: 100% !important;
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+    }
+
+    img {
+        max-width: 100% !important;
+        page-break-inside: avoid;
+    }
+
+    a[href]:after {
+        content: "" !important;
+    }
+}
+</style>
+
+{% else %}
+<article class="result">
+    <h2>No performance data</h2>
+    <p>The performance page needs the processed combined dataset and training outputs to exist first.</p>
+</article>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,822 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="world-monitor-page">
+    <div class="world-monitor-frame" id="worldMonitorFrame">
+        <div id="worldParticles" class="world-particles" aria-hidden="true"></div>
+
+        <div class="globe-stage">
+            <canvas id="globeCanvas"></canvas>
+
+            <article class="country-tooltip" id="countryTooltip" aria-live="polite">
+                <div class="spotlight-topline">
+                    <span class="spotlight-live-dot"></span>
+                    Live Country Brief
+                </div>
+                <h2 id="monitorCountry">Hover a country</h2>
+                <p class="spotlight-subline" id="monitorProvider">Move your cursor over the globe to preview live details.</p>
+
+                <div class="spotlight-grid tooltip-grid">
+                    <div class="spotlight-stat">
+                        <span>Risk</span>
+                        <strong id="monitorRisk">-</strong>
+                    </div>
+                    <div class="spotlight-stat">
+                        <span>Sentiment</span>
+                        <strong id="monitorSentiment">-</strong>
+                    </div>
+                    <div class="spotlight-stat">
+                        <span>Recommendation</span>
+                        <strong id="monitorRecommendation">-</strong>
+                    </div>
+                    <div class="spotlight-stat">
+                        <span>Confidence</span>
+                        <strong id="monitorConfidence">-</strong>
+                    </div>
+                </div>
+
+                <p class="spotlight-sync" id="monitorSync">Live hover preview</p>
+            </article>
+        </div>
+    </div>
+</section>
+
+<script>
+(function() {
+    var mainContainer = document.querySelector("main.container");
+    if (mainContainer) {
+        mainContainer.classList.add("world-monitor-shellless");
+    }
+})();
+</script>
+
+<script src="{{ url_for('static', filename='vendor/globe/d3.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/globe/topojson-client.min.js') }}"></script>
+
+<script>
+(function(){
+    var frame = document.getElementById("worldMonitorFrame");
+    var globeStage = document.querySelector(".globe-stage");
+    var canvas = document.getElementById("globeCanvas");
+    var particlesRoot = document.getElementById("worldParticles");
+    var tooltip = document.getElementById("countryTooltip");
+    var ctx = canvas.getContext("2d");
+    var countries = [];
+    var hoveredFeature = null;
+    var hoverTimer = null;
+    var hoverRequestId = 0;
+    var countryCache = {};
+    var autoRotate = true;
+    var autoRotateSpeed = 0.42;
+    var globeReady = false;
+    var isDragging = false;
+    var dragState = null;
+    var hoveredCountry = null;
+    var lastPointer = null;
+    var baseScale = 1;
+    var zoomLevel = 1;
+
+    var projection = d3.geoOrthographic();
+    var path = d3.geoPath(projection, ctx);
+    var graticule = d3.geoGraticule10();
+
+    var els = {
+        country: document.getElementById("monitorCountry"),
+        provider: document.getElementById("monitorProvider"),
+        risk: document.getElementById("monitorRisk"),
+        sentiment: document.getElementById("monitorSentiment"),
+        recommendation: document.getElementById("monitorRecommendation"),
+        confidence: document.getElementById("monitorConfidence"),
+        sync: document.getElementById("monitorSync")
+    };
+
+    function safeText(value, fallback){
+        return value === null || value === undefined || value === "" ? fallback : value;
+    }
+
+    function formatSync(unixSeconds){
+        if (!unixSeconds) return "Live sync unavailable";
+        return "Last live sync: " + new Date(unixSeconds * 1000).toLocaleString("en-IN", {
+            day: "2-digit",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit"
+        });
+    }
+
+    function formatSourceMode(mode){
+        if (mode === "live") return "Live";
+        if (mode === "mixed") return "Live + historical fallback";
+        if (mode === "historical") return "Historical fallback";
+        return "Source unavailable";
+    }
+
+    function getThemePalette(){
+        var theme = document.documentElement.getAttribute("data-theme") || "light";
+        if (theme === "dark") {
+            return {
+                sphereGradient: [
+                    { offset: 0, color: "rgba(36, 226, 255, 0.82)" },
+                    { offset: 0.38, color: "rgba(8, 92, 126, 0.92)" },
+                    { offset: 1, color: "rgba(1, 8, 18, 1)" }
+                ],
+                backCountryFill: "rgba(18, 112, 138, 0.18)",
+                backCountryStroke: "rgba(74, 224, 255, 0.08)",
+                frontCountryFill: "rgba(7, 44, 62, 0.84)",
+                hoverCountryFill: "rgba(104, 246, 255, 0.98)",
+                frontCountryStroke: "rgba(42, 198, 232, 0.14)",
+                hoverCountryStroke: "rgba(192, 253, 255, 0.52)"
+            };
+        }
+
+        return {
+            sphereGradient: [
+                { offset: 0, color: "rgba(116, 188, 255, 0.9)" },
+                { offset: 0.42, color: "rgba(92, 132, 234, 0.9)" },
+                { offset: 1, color: "rgba(206, 226, 255, 0.98)" }
+            ],
+            backCountryFill: "rgba(122, 154, 218, 0.16)",
+            backCountryStroke: "rgba(92, 126, 212, 0.08)",
+            frontCountryFill: "rgba(64, 92, 176, 0.72)",
+            hoverCountryFill: "rgba(72, 224, 255, 0.96)",
+            frontCountryStroke: "rgba(88, 112, 196, 0.12)",
+            hoverCountryStroke: "rgba(236, 250, 255, 0.58)"
+        };
+    }
+
+    function resetTooltipContent(country){
+        els.country.textContent = country || "Hover a country";
+        els.provider.textContent = country
+            ? "Loading live monitor..."
+            : "Move your cursor over the globe to preview live details.";
+        els.risk.textContent = "-";
+        els.sentiment.textContent = "-";
+        els.recommendation.textContent = "-";
+        els.confidence.textContent = "-";
+        els.sync.textContent = country ? "Fetching live signal..." : "Live hover preview";
+    }
+
+    function renderCountryPayload(payload){
+        els.country.textContent = payload.country || "Unknown";
+        els.provider.textContent = "Source: " + formatSourceMode(payload.source_mode) + " | Provider: " + safeText(payload.provider, "unknown");
+        els.risk.textContent = safeText(payload.top_risk, "No live signal");
+        els.sentiment.textContent = safeText(payload.top_sentiment, "No live signal");
+        els.recommendation.textContent = safeText(payload.top_recommendation, "Monitoring only");
+        els.confidence.textContent = payload.average_confidence != null ? (payload.average_confidence + "%") : "No confidence yet";
+        els.sync.textContent = payload.source_mode === "historical"
+            ? "Showing historical fallback coverage"
+            : formatSync(payload.last_sync);
+    }
+
+    function showTooltip(){
+        tooltip.classList.add("is-visible");
+        if (lastPointer) positionTooltip(lastPointer.clientX, lastPointer.clientY);
+    }
+
+    function hideTooltip(){
+        tooltip.classList.remove("is-visible");
+        hoveredCountry = null;
+        hoverRequestId++;
+    }
+
+    function positionTooltip(clientX, clientY){
+        if (!tooltip.classList.contains("is-visible")) return;
+        var stageRect = globeStage.getBoundingClientRect();
+        var tooltipRect = tooltip.getBoundingClientRect();
+        var left = clientX - stageRect.left + 18;
+        var top = clientY - stageRect.top - tooltipRect.height - 18;
+
+        if (left + tooltipRect.width > stageRect.width - 18) {
+            left = clientX - stageRect.left - tooltipRect.width - 18;
+        }
+        if (top < 18) {
+            top = clientY - stageRect.top + 18;
+        }
+        if (top + tooltipRect.height > stageRect.height - 18) {
+            top = stageRect.height - tooltipRect.height - 18;
+        }
+
+        tooltip.style.left = Math.max(18, left) + "px";
+        tooltip.style.top = Math.max(18, top) + "px";
+    }
+
+    function showFallback(message){
+        globeReady = false;
+        frame.classList.add("world-monitor-fallback");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        resetTooltipContent("World monitor unavailable");
+        els.provider.textContent = message;
+        showTooltip();
+    }
+
+    function fetchCountry(country, forceRefresh){
+        if (!country) return;
+        if (!forceRefresh && countryCache[country]) {
+            renderCountryPayload(countryCache[country]);
+            return;
+        }
+
+        var requestId = ++hoverRequestId;
+        fetch("/api/country-monitor?country=" + encodeURIComponent(country) + (forceRefresh ? "&refresh=1" : ""))
+            .then(function(res){ return res.json(); })
+            .then(function(payload){
+                if (payload.status !== "ok") throw new Error(payload.message || "Could not load country monitor");
+                countryCache[country] = payload;
+                if (requestId !== hoverRequestId || hoveredCountry !== country) return;
+                renderCountryPayload(payload);
+            })
+            .catch(function(error){
+                if (requestId !== hoverRequestId || hoveredCountry !== country) return;
+                els.country.textContent = country;
+                els.provider.textContent = "World monitor error";
+                els.sync.textContent = error.message || "Could not load live country details.";
+            });
+    }
+
+    function featureName(feature){
+        return feature && feature.properties
+            ? (feature.properties.NAME || feature.properties.ADMIN || feature.properties.name)
+            : null;
+    }
+
+    function updateProjection(bounds){
+        var desiredScale = baseScale * zoomLevel;
+        var padding = 14;
+        var maxVisibleScale = Math.max(
+            40,
+            Math.min(bounds.width, bounds.height) * 0.5 - padding
+        );
+        var scale = Math.max(baseScale, Math.min(desiredScale, maxVisibleScale));
+        projection
+            .translate([bounds.width / 2, bounds.height / 2])
+            .scale(scale)
+            .clipAngle(90)
+            .precision(0.4);
+    }
+
+    function resizeCanvas(){
+        var bounds = canvas.getBoundingClientRect();
+        var ratio = window.devicePixelRatio || 1;
+        canvas.width = Math.max(1, Math.round(bounds.width * ratio));
+        canvas.height = Math.max(1, Math.round(bounds.height * ratio));
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        baseScale = Math.min(bounds.width * 0.18, bounds.height * 0.22);
+        updateProjection(bounds);
+        draw();
+    }
+
+    function createThroughPath(){
+        var fullProjection = d3.geoOrthographic()
+            .translate(projection.translate())
+            .scale(projection.scale())
+            .rotate(projection.rotate())
+            .clipAngle(179.999)
+            .precision(0.4);
+        return d3.geoPath(fullProjection, ctx);
+    }
+
+    function globeCenter(){
+        var rotation = projection.rotate();
+        return [-rotation[0], -rotation[1]];
+    }
+
+    function isFrontHemisphere(feature){
+        var centroid = d3.geoCentroid(feature);
+        return d3.geoDistance(centroid, globeCenter()) <= Math.PI / 2;
+    }
+
+    function drawSphere(){
+        var palette = getThemePalette();
+        var translate = projection.translate();
+        var radius = projection.scale();
+        var centerX = translate[0];
+        var centerY = translate[1];
+        var gradient = ctx.createRadialGradient(
+            centerX - radius * 0.22,
+            centerY - radius * 0.2,
+            radius * 0.04,
+            centerX,
+            centerY,
+            radius
+        );
+        palette.sphereGradient.forEach(function(stop){
+            gradient.addColorStop(stop.offset, stop.color);
+        });
+
+        ctx.beginPath();
+        path({ type: "Sphere" });
+        ctx.fillStyle = gradient;
+        ctx.fill();
+    }
+
+    function draw(){
+        var palette = getThemePalette();
+        var bounds = canvas.getBoundingClientRect();
+        var width = bounds.width;
+        var height = bounds.height;
+        var throughPath = createThroughPath();
+        var frontFeatures = [];
+        var backFeatures = [];
+
+        ctx.clearRect(0, 0, width, height);
+        drawSphere();
+
+        countries.forEach(function(feature){
+            if (isFrontHemisphere(feature)) {
+                frontFeatures.push(feature);
+            } else {
+                backFeatures.push(feature);
+            }
+        });
+
+        ctx.save();
+        ctx.beginPath();
+        path({ type: "Sphere" });
+        ctx.clip();
+
+        backFeatures.forEach(function(feature){
+            ctx.beginPath();
+            throughPath(feature);
+            ctx.fillStyle = palette.backCountryFill;
+            ctx.fill();
+            ctx.strokeStyle = palette.backCountryStroke;
+            ctx.lineWidth = 0.35;
+            ctx.stroke();
+        });
+
+        frontFeatures.forEach(function(feature){
+            var isHovered = feature === hoveredFeature;
+
+            ctx.beginPath();
+            path(feature);
+            ctx.fillStyle = isHovered
+                ? palette.hoverCountryFill
+                : palette.frontCountryFill;
+            ctx.fill();
+            ctx.strokeStyle = isHovered
+                ? palette.hoverCountryStroke
+                : palette.frontCountryStroke;
+            ctx.lineWidth = isHovered ? 0.9 : 0.3;
+            ctx.stroke();
+        });
+
+        ctx.restore();
+
+    }
+
+    function rotateGlobe(dx, dy){
+        var rotation = projection.rotate();
+        rotation[0] += dx * 0.35;
+        rotation[1] -= dy * 0.35;
+        rotation[1] = Math.max(-55, Math.min(55, rotation[1]));
+        projection.rotate(rotation);
+        draw();
+    }
+
+    function adjustZoom(deltaY){
+        zoomLevel += deltaY > 0 ? -0.18 : 0.18;
+        zoomLevel = Math.max(1, Math.min(8, zoomLevel));
+        updateProjection(canvas.getBoundingClientRect());
+        draw();
+    }
+
+    function hoveredCountryAtPoint(x, y){
+        var geoPoint = projection.invert([x, y]);
+        if (!geoPoint) return null;
+        for (var idx = countries.length - 1; idx >= 0; idx--) {
+            if (d3.geoContains(countries[idx], geoPoint)) return countries[idx];
+        }
+        return null;
+    }
+
+    function updateHoverFromPointer(event){
+        if (!globeReady || isDragging) return;
+        lastPointer = event;
+        var rect = canvas.getBoundingClientRect();
+        var feature = hoveredCountryAtPoint(event.clientX - rect.left, event.clientY - rect.top);
+        hoveredFeature = feature;
+        draw();
+
+        if (hoverTimer) window.clearTimeout(hoverTimer);
+
+        var name = featureName(feature);
+        if (!name) {
+            hideTooltip();
+            return;
+        }
+
+        hoveredCountry = name;
+        resetTooltipContent(name);
+        showTooltip();
+        positionTooltip(event.clientX, event.clientY);
+
+        hoverTimer = window.setTimeout(function(){
+            fetchCountry(name, false);
+        }, 120);
+    }
+
+    function createParticles(){
+        var count = 46;
+        var html = "";
+        for (var i = 0; i < count; i++) {
+            var size = (Math.random() * 5 + 2).toFixed(2);
+            var left = (Math.random() * 100).toFixed(2);
+            var top = (Math.random() * 100).toFixed(2);
+            var delay = (Math.random() * 6).toFixed(2);
+            var duration = (Math.random() * 10 + 10).toFixed(2);
+            var opacity = (Math.random() * 0.45 + 0.12).toFixed(2);
+            var driftX = (Math.random() * 44 - 22).toFixed(2);
+            var driftY = (Math.random() * 44 - 22).toFixed(2);
+            var twinkleDuration = (Math.random() * 5 + 3.2).toFixed(2);
+            var twinkleDelay = (Math.random() * 8).toFixed(2);
+            html += '<span class="world-particle" style="width:' + size + 'px;height:' + size + 'px;left:' + left + '%;top:' + top + '%;animation-delay:' + delay + 's, ' + twinkleDelay + 's;--duration:' + duration + 's;--twinkle-duration:' + twinkleDuration + 's;--drift-x:' + driftX + 'px;--drift-y:' + driftY + 'px;--particle-opacity:' + opacity + ';opacity:' + opacity + ';"></span>';
+        }
+        particlesRoot.innerHTML = html;
+    }
+
+    function animate(){
+        if (globeReady && autoRotate && !isDragging) {
+            rotateGlobe(autoRotateSpeed, 0);
+        }
+        requestAnimationFrame(animate);
+    }
+
+    canvas.addEventListener("mousemove", updateHoverFromPointer);
+    canvas.addEventListener("mouseleave", function(){
+        hoveredFeature = null;
+        lastPointer = null;
+        hideTooltip();
+        draw();
+    });
+    canvas.addEventListener("wheel", function(event){
+        event.preventDefault();
+        adjustZoom(event.deltaY);
+        if (lastPointer) positionTooltip(lastPointer.clientX, lastPointer.clientY);
+    }, { passive: false });
+    canvas.addEventListener("dblclick", function(){
+        zoomLevel = 1;
+        updateProjection(canvas.getBoundingClientRect());
+        draw();
+    });
+    canvas.addEventListener("mousedown", function(event){
+        isDragging = true;
+        autoRotate = false;
+        dragState = { x: event.clientX, y: event.clientY };
+    });
+    window.addEventListener("mousemove", function(event){
+        if (!isDragging || !dragState) return;
+        rotateGlobe(event.clientX - dragState.x, event.clientY - dragState.y);
+        dragState = { x: event.clientX, y: event.clientY };
+        if (lastPointer) positionTooltip(lastPointer.clientX, lastPointer.clientY);
+    });
+    window.addEventListener("mouseup", function(){
+        isDragging = false;
+        dragState = null;
+    });
+    window.addEventListener("resize", resizeCanvas);
+
+    var themeObserver = new MutationObserver(function(){
+        draw();
+    });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+    createParticles();
+    resetTooltipContent();
+
+    fetch("{{ url_for('static', filename='vendor/globe/countries-110m.json') }}")
+        .then(function(res){ return res.json(); })
+        .then(function(worldData){
+            countries = topojson.feature(worldData, worldData.objects.countries).features;
+            globeReady = true;
+            frame.classList.remove("world-monitor-fallback");
+            resizeCanvas();
+            draw();
+            animate();
+        })
+        .catch(function(error){
+            showFallback(error && error.message ? error.message : "Could not load local world country data.");
+        });
+})();
+</script>
+
+<style>
+main.container.world-monitor-shellless {
+    width: 100vw;
+    max-width: 100vw;
+    margin: 0 calc(50% - 50vw);
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: none;
+}
+
+.world-monitor-page {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    height: calc(100vh - 94px);
+    min-height: calc(100vh - 94px);
+}
+
+.world-monitor-frame {
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    height: calc(100vh - 94px);
+    min-height: calc(100vh - 94px);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "stage";
+    gap: 0;
+    padding: 0;
+    border-radius: 0;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 50% 42%, rgba(34, 212, 255, 0.1), transparent 16%),
+        radial-gradient(circle at 20% 20%, rgba(18, 138, 196, 0.11), transparent 20%),
+        radial-gradient(circle at 82% 76%, rgba(74, 255, 237, 0.07), transparent 18%),
+        linear-gradient(180deg, #030813 0%, #040b16 50%, #02060d 100%);
+    box-shadow: inset 0 0 0 1px rgba(56, 210, 255, 0.12);
+}
+
+[data-theme="light"] .world-monitor-frame {
+    background:
+        radial-gradient(circle at 50% 42%, rgba(96, 196, 255, 0.22), transparent 18%),
+        radial-gradient(circle at 20% 20%, rgba(142, 169, 255, 0.18), transparent 22%),
+        radial-gradient(circle at 82% 76%, rgba(124, 234, 255, 0.12), transparent 20%),
+        linear-gradient(180deg, #eef5ff 0%, #e8f1ff 52%, #e3ecff 100%);
+    box-shadow: inset 0 0 0 1px rgba(118, 156, 255, 0.16);
+}
+
+.globe-stage {
+    position: relative;
+    grid-area: stage;
+    height: 100%;
+    min-height: calc(100vh - 94px);
+    z-index: 2;
+}
+
+#globeCanvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    display: block;
+    cursor: grab;
+}
+
+#globeCanvas:active {
+    cursor: grabbing;
+}
+
+.world-particles {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.world-particle {
+    position: absolute;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(112,255,247,0.95), rgba(46,178,255,0.34) 68%, transparent 72%);
+    box-shadow: 0 0 14px rgba(72,214,255,0.3);
+    animation: world-drift var(--duration, 14s) ease-in-out infinite alternate,
+               world-twinkle var(--twinkle-duration, 6s) ease-in-out infinite;
+    will-change: transform, opacity, box-shadow, filter;
+}
+
+[data-theme="light"] .world-particle {
+    background: radial-gradient(circle, rgba(112, 214, 255, 0.95), rgba(112, 148, 255, 0.28) 68%, transparent 72%);
+    box-shadow: 0 0 14px rgba(104, 164, 255, 0.24);
+}
+
+@keyframes world-drift {
+    0% {
+        transform: translate3d(0, 0, 0) scale(0.9);
+    }
+    50% {
+        transform: translate3d(var(--drift-x, 10px), calc(var(--drift-y, -12px) * 0.55), 0) scale(1.05);
+    }
+    100% {
+        transform: translate3d(calc(var(--drift-x, 10px) * -0.75), var(--drift-y, -12px), 0) scale(1.16);
+    }
+}
+
+@keyframes world-twinkle {
+    0%, 100% {
+        opacity: calc(var(--particle-opacity, 0.3) * 0.35);
+        filter: brightness(0.78);
+        box-shadow: 0 0 4px rgba(72,214,255,0.1);
+    }
+    22% {
+        opacity: calc(var(--particle-opacity, 0.3) * 0.58);
+        filter: brightness(0.9);
+        box-shadow: 0 0 8px rgba(72,214,255,0.16);
+    }
+    50% {
+        opacity: calc(var(--particle-opacity, 0.3) + 0.42);
+        filter: brightness(1.7);
+        box-shadow: 0 0 22px rgba(112,255,247,0.58), 0 0 36px rgba(112,255,247,0.22);
+    }
+    74% {
+        opacity: calc(var(--particle-opacity, 0.3) * 0.52);
+        filter: brightness(0.88);
+        box-shadow: 0 0 7px rgba(72,214,255,0.14);
+    }
+}
+
+.monitor-status-dot,
+.spotlight-live-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #66f4ff;
+    box-shadow: 0 0 18px rgba(102,244,255,0.78);
+}
+
+[data-theme="light"] .monitor-status-dot,
+[data-theme="light"] .spotlight-live-dot {
+    background: #4ac7ff;
+    box-shadow: 0 0 16px rgba(74, 199, 255, 0.48);
+}
+
+.country-tooltip {
+    position: absolute;
+    left: 18px;
+    top: 18px;
+    z-index: 4;
+    width: min(360px, calc(100vw - 40px));
+    max-height: min(420px, calc(100vh - 220px));
+    overflow: auto;
+    padding: 16px 16px 14px;
+    border-radius: 22px;
+    background: linear-gradient(180deg, rgba(3,14,24,0.92), rgba(2,8,16,0.96));
+    border: 1px solid rgba(122, 244, 255, 0.46);
+    box-shadow: 0 20px 54px rgba(0,0,0,0.42), 0 0 44px rgba(54,214,255,0.18);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    pointer-events: none;
+    opacity: 0;
+    transform: translate3d(0, 6px, 0) scale(0.98);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+[data-theme="light"] .country-tooltip {
+    background: linear-gradient(180deg, rgba(249, 252, 255, 0.92), rgba(236, 244, 255, 0.96));
+    border: 1px solid rgba(138, 176, 255, 0.38);
+    box-shadow: 0 20px 54px rgba(62, 90, 140, 0.16), 0 0 34px rgba(96, 176, 255, 0.14);
+}
+
+.country-tooltip.is-visible {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+}
+
+.spotlight-topline {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.86rem;
+    color: rgba(202, 248, 255, 0.84);
+    margin-bottom: 10px;
+}
+
+[data-theme="light"] .spotlight-topline {
+    color: rgba(52, 92, 150, 0.84);
+}
+
+.country-tooltip h2 {
+    font-size: clamp(1.6rem, 3vw, 2.6rem);
+    color: #ffffff;
+    margin-bottom: 4px;
+}
+
+[data-theme="light"] .country-tooltip h2 {
+    color: #24345e;
+}
+
+.spotlight-subline {
+    color: rgba(182, 233, 244, 0.78);
+    margin-bottom: 14px;
+}
+
+[data-theme="light"] .spotlight-subline {
+    color: rgba(72, 104, 156, 0.82);
+}
+
+.spotlight-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.tooltip-grid {
+    margin-bottom: 10px;
+}
+
+.spotlight-stat {
+    padding: 12px;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+[data-theme="light"] .spotlight-stat {
+    background: rgba(255,255,255,0.5);
+    border: 1px solid rgba(150, 180, 255, 0.18);
+}
+
+.spotlight-stat span {
+    display: block;
+    font-size: 0.72rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: rgba(146, 224, 239, 0.62);
+    margin-bottom: 8px;
+}
+
+[data-theme="light"] .spotlight-stat span {
+    color: rgba(84, 122, 184, 0.7);
+}
+
+.spotlight-stat strong {
+    display: block;
+    font-size: 1.05rem;
+    line-height: 1.35;
+    color: #eaffff;
+}
+
+[data-theme="light"] .spotlight-stat strong {
+    color: #23355f;
+}
+
+.spotlight-sync {
+    color: rgba(162, 228, 241, 0.74);
+    font-size: 0.92rem;
+}
+
+[data-theme="light"] .spotlight-sync {
+    color: rgba(74, 108, 166, 0.8);
+}
+
+@media (max-width: 980px) {
+    main.container.world-monitor-shellless {
+        width: 100vw;
+        max-width: 100vw;
+        margin: 0 calc(50% - 50vw);
+    }
+
+    .world-monitor-frame {
+        grid-template-columns: 1fr;
+        grid-template-areas: "stage";
+        padding: 0;
+    }
+
+    .globe-stage {
+        min-height: calc(100vh - 94px);
+    }
+
+    .country-tooltip {
+        width: min(340px, calc(100vw - 36px));
+        max-height: min(380px, calc(100vh - 200px));
+    }
+}
+
+@media (max-width: 640px) {
+    main.container.world-monitor-shellless {
+        width: 100%;
+        max-width: 100%;
+        margin: 0;
+    }
+
+    .world-monitor-frame,
+    .globe-stage {
+        border-radius: 0;
+    }
+
+    .world-monitor-frame {
+        padding: 0;
+    }
+
+    .globe-stage {
+        min-height: calc(100vh - 94px);
+    }
+
+    .spotlight-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .country-tooltip {
+        width: min(300px, calc(100vw - 28px));
+        max-height: min(340px, calc(100vh - 180px));
+        padding: 14px 14px 12px;
+    }
+}
+</style>
+{% endblock %}

@@ -1,0 +1,521 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<!-- MARKET ALERT BANNER -->
+<div id="marketAlertBanner" style="display:none;padding:14px 20px;border-radius:14px;background:rgba(220,50,80,0.1);border:1px solid rgba(220,50,80,0.35);margin-bottom:20px;align-items:center;gap:12px">
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style="flex-shrink:0;color:#ff4f8b">
+        <circle cx="10" cy="10" r="8.5" stroke="currentColor" stroke-width="1.6"/>
+        <path d="M10 6v5M10 14v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </svg>
+    <div>
+        <p style="font-weight:700;font-size:14px;color:var(--rose)" id="alertTitle">Market Alert</p>
+        <p style="font-size:12px;color:var(--muted)" id="alertDetail"></p>
+    </div>
+    <button onclick="document.getElementById('marketAlertBanner').style.display='none'" style="margin-left:auto;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;padding:0;width:auto;box-shadow:none">✕</button>
+</div>
+
+<section class="hero hero-home">
+    <div class="hero-copy">
+        <p class="eyebrow">Geo-sensitive market guidance</p>
+        <h1 id="typewriter-el"><span id="typewriter-text"></span><span id="typewriter-cursor"></span></h1>
+        <p class="lede">
+            GeoFinance AI combines verified news extraction, pattern analysis, live market context,
+            and rule-backed recommendations in one polished decision surface.
+        </p>
+        <div class="hero-pills">
+            <span class="hero-pill">Verified news sources</span>
+            <span class="hero-pill">Live market snapshot</span>
+            <span class="hero-pill">Recommendation engine</span>
+        </div>
+    </div>
+    <div class="hero-aside">
+        <div class="hero-metric">
+            <span class="hero-label">Workflow</span>
+            <strong>Extract → Train → Predict</strong>
+        </div>
+        <div class="hero-metric">
+            <span class="hero-label">Coverage</span>
+            <strong>Geo + Finance</strong>
+        </div>
+        <div class="hero-metric">
+            <span class="hero-label">Mode</span>
+            <strong>Decision support</strong>
+        </div>
+    </div>
+</section>
+
+{% if evaluation %}
+<section class="stats-row">
+    <article class="stat-card" data-count="{{ (evaluation.accuracy * 100) | round | int }}" data-suffix="%">
+        <span>Model accuracy</span>
+        <strong id="cnt-accuracy">{{ (evaluation.accuracy * 100) | round(1) }}%</strong>
+    </article>
+    <article class="stat-card" data-count="{{ home_metrics.dataset_rows }}" data-suffix="">
+        <span>Live dataset rows</span>
+        <strong id="cnt-rows">{{ home_metrics.dataset_rows }}</strong>
+        <p class="meta" id="datasetRowsMeta" style="margin-top:8px">Includes {{ home_metrics.live_rows }} live API records</p>
+        <p class="meta" id="datasetRowsSource">Provider: {{ home_metrics.live_provider or "waiting" }} · Headlines: {{ home_metrics.live_record_count or 0 }}</p>
+        <p class="meta" id="datasetRowsSync">Last sync: {{ home_metrics.last_live_sync_label or "not fetched yet" }}</p>
+        <button type="button" id="refreshDatasetBtn" class="secondary-button" style="margin-top:12px">Refresh dataset now</button>
+    </article>
+    <article class="stat-card">
+        <span>Best model</span>
+        <strong id="bestModelLabel">{{ evaluation.best_model | replace("_"," ") | title }}</strong>
+        <p class="meta" id="bestModelMeta" style="margin-top:8px">
+            {% if evaluation.trained_at %}
+            Trained: {{ evaluation.trained_at }}
+            {% else %}
+            Training artifact loaded
+            {% endif %}
+        </p>
+    </article>
+</section>
+{% endif %}
+
+<section class="panel panel-form">
+    <div class="panel-head">
+        <div>
+            <p class="eyebrow">Scenario builder</p>
+            <h2>Build the current macro situation</h2>
+        </div>
+        <p class="meta">Choose the combination below and generate a recommendation instantly.</p>
+    </div>
+
+    <form method="POST" class="input-grid">
+        <div class="field-card">
+            <label for="risk">Geopolitical risk</label>
+            <select id="risk" name="risk">
+                {% for r in risks %}
+                <option value="{{ r }}" {% if selection.risk == r %}selected{% endif %}>{{ r }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="field-card">
+            <label for="sentiment">Market sentiment</label>
+            <select id="sentiment" name="sentiment">
+                {% for s in sentiments %}
+                <option value="{{ s }}" {% if selection.sentiment == s %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="field-card">
+        </div>
+        <div class="field-submit">
+            <button type="submit" id="submitBtn">Generate Recommendation</button>
+        </div>
+    </form>
+</section>
+
+{% if prediction %}
+<section class="result-grid">
+    <article class="result recommendation-card">
+        <h2>Recommendation</h2>
+        <p class="highlight recommendation-text">{{ prediction }}</p>
+        {% if confidence is not none %}
+        <div class="gauge-wrap">
+            <span class="gauge-label">Historical match confidence</span>
+            <svg class="gauge-svg" viewBox="0 0 180 100" id="gaugesvg">
+                <path class="gauge-track" d="M20 90 A70 70 0 0 1 160 90"/>
+                <path class="gauge-arc"   d="M20 90 A70 70 0 0 1 160 90" id="gaugeArc"/>
+                <text class="gauge-num" x="90" y="88" text-anchor="middle" id="gaugeNum">0%</text>
+                <text class="gauge-sub" x="90" y="100" text-anchor="middle">confidence</text>
+            </svg>
+        </div>
+        {% else %}
+        <p class="meta" style="margin-top:12px">Historical confidence unavailable — dataset missing.</p>
+        {% endif %}
+    </article>
+
+    <article class="result inputs-card">
+        <h2>Current inputs</h2>
+        <div class="input-tags">
+            <span class="input-tag">Risk level: <strong>&nbsp;{{ selection.risk }}</strong></span>
+            <span class="input-tag">Sentiment: <strong>&nbsp;{{ selection.sentiment }}</strong></span>
+        </div>
+    </article>
+
+    <article class="result result-wide market-card">
+        <h2>Live market snapshot</h2>
+        <div class="market-grid" id="marketGrid">
+            <p class="market-item skeleton skeleton-block" style="height:56px" id="goldPrice">Loading...</p>
+            <p class="market-item skeleton skeleton-block" style="height:56px" id="oilPrice">Loading...</p>
+            <p class="market-item skeleton skeleton-block" style="height:56px" id="niftyPrice">Loading...</p>
+            <p class="market-item skeleton skeleton-block" style="height:56px" id="sensexPrice">Loading...</p>
+            <p class="market-item skeleton skeleton-block" style="height:56px" id="fxRate">Loading...</p>
+        </div>
+        <p id="marketStatus" class="meta">Fetching latest prices... <span id="updatedAgo" style="margin-left:8px;opacity:0.6"></span></p>
+        <p id="marketNote" class="meta"></p>
+        <button type="button" id="marketDebugToggle" class="secondary-button hidden">Show technical details</button>
+        <pre id="marketDebug" class="debug-box hidden"></pre>
+    </article>
+</section>
+
+<script>
+(function(){
+    function formatSyncLabel(unixSeconds){
+        if(!unixSeconds) return "Last sync: unavailable";
+        var date = new Date(unixSeconds * 1000);
+        return "Last sync: " + date.toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit", second:"2-digit" });
+    }
+
+    function updateDatasetSummary(forceRefresh){
+        var url = forceRefresh ? "/api/dataset-summary?refresh=1" : "/api/dataset-summary";
+        fetch(url)
+            .then(function(res){ return res.json(); })
+            .then(function(summary){
+                var countEl = document.getElementById("cnt-rows");
+                var metaEl = document.getElementById("datasetRowsMeta");
+                var sourceEl = document.getElementById("datasetRowsSource");
+                var syncEl = document.getElementById("datasetRowsSync");
+                if(countEl && typeof summary.total_articles !== "undefined"){
+                    countEl.textContent = summary.total_articles;
+                    var card = countEl.closest(".stat-card");
+                    if(card) card.setAttribute("data-count", summary.total_articles);
+                }
+                if(metaEl){
+                    metaEl.textContent = "Includes " + (summary.live_articles || 0) + " live API records";
+                }
+                if(sourceEl){
+                    sourceEl.textContent = "Provider: " + (summary.live_provider || "unknown") + " · Headlines: " + (summary.live_record_count || 0);
+                }
+                if(syncEl){
+                    syncEl.textContent = formatSyncLabel(summary.last_live_sync);
+                }
+            })
+            .catch(function(){});
+    }
+
+    updateDatasetSummary(true);
+    setInterval(function(){ updateDatasetSummary(true); }, 120000);
+})();
+</script>
+
+<script>
+(function(){
+    var btn = document.getElementById("refreshDatasetBtn");
+    if(!btn) return;
+
+    function updateTrainingStats(payload){
+        var evaluation = payload && payload.evaluation ? payload.evaluation : null;
+        if(!evaluation) return;
+
+        var accuracyEl = document.getElementById("cnt-accuracy");
+        var bestModelEl = document.getElementById("bestModelLabel");
+        var bestModelMetaEl = document.getElementById("bestModelMeta");
+
+        if(accuracyEl && typeof evaluation.accuracy !== "undefined"){
+            accuracyEl.textContent = (Number(evaluation.accuracy) * 100).toFixed(1) + "%";
+        }
+        if(bestModelEl && evaluation.best_model){
+            bestModelEl.textContent = evaluation.best_model.replaceAll("_", " ").replace(/\b\w/g, function(ch){ return ch.toUpperCase(); });
+        }
+        if(bestModelMetaEl){
+            bestModelMetaEl.textContent = evaluation.trained_at ? ("Trained: " + evaluation.trained_at) : "Training artifact updated";
+        }
+    }
+
+    btn.addEventListener("click", function(){
+        btn.disabled = true;
+        btn.textContent = "Refreshing...";
+        if(window.showToast) showToast("Fetching live data and retraining model...", "info");
+
+        fetch("/api/refresh-runtime-model", { method: "POST" })
+            .then(function(res){ return res.json().then(function(body){ return { ok: res.ok, body: body }; }); })
+            .then(function(result){
+                if(!result.ok || result.body.status !== "ok"){
+                    throw new Error((result.body && result.body.message) || "Refresh failed");
+                }
+                updateTrainingStats(result.body);
+                if(window.showToast) showToast("Runtime dataset and model refreshed", "success");
+                return fetch("/api/dataset-summary?refresh=1");
+            })
+            .then(function(res){ return res.json(); })
+            .then(function(summary){
+                document.getElementById("cnt-rows").textContent = summary.total_articles;
+                document.getElementById("datasetRowsMeta").textContent = "Includes " + (summary.live_articles || 0) + " live API records";
+                document.getElementById("datasetRowsSource").textContent = "Provider: " + (summary.live_provider || "unknown") + " · Headlines: " + (summary.live_record_count || 0);
+                document.getElementById("datasetRowsSync").textContent = "Last sync: " + new Date((summary.last_live_sync || 0) * 1000).toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit", second:"2-digit" });
+            })
+            .catch(function(error){
+                if(window.showToast) showToast(error.message || "Refresh failed", "error");
+            })
+            .finally(function(){
+                btn.disabled = false;
+                btn.textContent = "Refresh dataset now";
+            });
+    });
+})();
+</script>
+
+<script>
+(function(){
+    var conf = {{ confidence | tojson }};
+    if (conf === null || conf === undefined) return;
+    var pct = Math.min(Math.max(Number(conf), 0), 100);
+    var arc = document.getElementById("gaugeArc");
+    var num = document.getElementById("gaugeNum");
+    var totalLen = 220;
+    var color = pct >= 70 ? "#1ed4a0" : pct >= 40 ? "#ff8e3c" : "#ff4f8b";
+    arc.style.stroke = color;
+    num.style.fill = color;
+    setTimeout(function(){
+        var offset = totalLen - (totalLen * pct / 100);
+        arc.style.strokeDashoffset = offset;
+        var current = 0;
+        var step = pct / 60;
+        var timer = setInterval(function(){
+            current = Math.min(current + step, pct);
+            num.textContent = Math.round(current) + "%";
+            if (current >= pct) clearInterval(timer);
+        }, 16);
+    }, 300);
+})();
+</script>
+
+<script>
+var lastFetchedAt = null;
+
+function updateAgo(){
+    var el = document.getElementById("updatedAgo");
+    if(!el || !lastFetchedAt) return;
+    var secs = Math.floor((Date.now() - lastFetchedAt) / 1000);
+    if(secs < 10) el.textContent = "· Updated just now";
+    else if(secs < 60) el.textContent = "· Updated " + secs + "s ago";
+    else el.textContent = "· Updated " + Math.floor(secs/60) + " min ago";
+}
+setInterval(updateAgo, 5000);
+
+function formatIndianNumber(value) {
+    var number = Number(value);
+    if (!isFinite(number)) return value;
+    return number.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function clearSkeleton(el) {
+    el.classList.remove("skeleton","skeleton-block");
+    el.style.height = "";
+}
+
+var prevNifty = null;
+
+function checkMarketAlerts(data){
+    var banner = document.getElementById("marketAlertBanner");
+    var title  = document.getElementById("alertTitle");
+    var detail = document.getElementById("alertDetail");
+    var alerts = [];
+
+    if(prevNifty !== null && data.nifty !== "Unavailable"){
+        var current = Number(data.nifty);
+        var change  = ((current - prevNifty) / prevNifty) * 100;
+        if(change <= -1){
+            alerts.push("NIFTY dropped " + Math.abs(change).toFixed(2) + "% — currently at " + current.toLocaleString("en-IN") + " pts");
+        }
+    }
+    if(data.nifty !== "Unavailable") prevNifty = Number(data.nifty);
+
+    if(alerts.length){
+        title.textContent  = "⚠ Market Alert";
+        detail.textContent = alerts.join(" | ");
+        banner.style.display = "flex";
+        if(window.showToast) showToast("Market alert triggered!", "error");
+    }
+}
+
+function fetchMarketData() {
+    fetch("/api/live-data")
+        .then(function(res){ return res.json(); })
+        .then(function(data) {
+            var elems = {
+                gold:   document.getElementById("goldPrice"),
+                oil:    document.getElementById("oilPrice"),
+                nifty:  document.getElementById("niftyPrice"),
+                sensex: document.getElementById("sensexPrice"),
+                fx:     document.getElementById("fxRate")
+            };
+            Object.values(elems).forEach(clearSkeleton);
+
+            elems.gold.innerText   = data.gold   === "Unavailable" ? "Gold: Unavailable"    : "Gold: ₹"   + formatIndianNumber(data.gold)   + " / oz";
+            elems.oil.innerText    = data.oil    === "Unavailable" ? "Oil: Unavailable"     : "Oil: ₹"    + formatIndianNumber(data.oil)    + " / barrel";
+            elems.nifty.innerText  = data.nifty  === "Unavailable" ? "NIFTY: Unavailable"   : "NIFTY: "   + formatIndianNumber(data.nifty)  + " pts";
+            elems.sensex.innerText = data.sensex === "Unavailable" ? "SENSEX: Unavailable"  : "SENSEX: "  + formatIndianNumber(data.sensex) + " pts";
+            elems.fx.innerText     = data.usdinr === "Unavailable" ? "USD/INR: Unavailable" : "USD/INR: " + formatIndianNumber(data.usdinr);
+
+            elems.gold.className   = "market-item " + (data.gold   === "Unavailable" ? "market-down" : "market-up");
+            elems.oil.className    = "market-item " + (data.oil    === "Unavailable" ? "market-down" : "market-up");
+            elems.nifty.className  = "market-item " + (data.nifty  === "Unavailable" ? "market-down" : "market-up");
+            elems.sensex.className = "market-item " + (data.sensex === "Unavailable" ? "market-down" : "market-up");
+            elems.fx.className     = "market-item " + (data.usdinr === "Unavailable" ? "market-down" : "market-neutral");
+
+            var statusMap = { miss:"Updated just now", hit:"Using recent cached snapshot", "stale-success":"Using last successful snapshot", empty:"No market data available yet" };
+            document.getElementById("marketStatus").innerText = "Market data: " + (statusMap[data.cache] || data.cache || "unknown");
+
+            if(window.showToast) showToast("Market data refreshed", "success");
+            lastFetchedAt = Date.now();
+            updateAgo();
+            checkMarketAlerts(data);
+
+            var hasFailure = [data.gold, data.oil, data.nifty, data.sensex].includes("Unavailable");
+            var dbx = document.getElementById("marketDebug");
+            var dbt = document.getElementById("marketDebugToggle");
+            if(hasFailure){
+                dbx.innerText = JSON.stringify(data.debug||{}, null, 2);
+                dbt.classList.remove("hidden");
+            } else {
+                dbx.classList.add("hidden");
+                dbt.classList.add("hidden");
+            }
+        })
+        .catch(function(){
+            ["goldPrice","oilPrice","niftyPrice","sensexPrice","fxRate"].forEach(function(id){
+                var el = document.getElementById(id);
+                clearSkeleton(el);
+                el.innerText = id.replace("Price","").replace("Rate","").toUpperCase() + ": Unavailable";
+                el.className = "market-item market-down";
+            });
+            document.getElementById("marketStatus").innerText = "Market data: request failed";
+            if(window.showToast) showToast("Market data unavailable", "error");
+        });
+}
+
+fetchMarketData();
+setInterval(fetchMarketData, 30000);
+
+document.getElementById("marketDebugToggle").addEventListener("click", function(){
+    var dbx = document.getElementById("marketDebug");
+    var hidden = dbx.classList.contains("hidden");
+    dbx.classList.toggle("hidden", !hidden);
+    this.innerText = hidden ? "Hide technical details" : "Show technical details";
+});
+</script>
+{% endif %}
+
+<script>
+(function(){
+    var phrases = [
+        "Turn geopolitical signals into a sharper investment read.",
+        "Read the world. Beat the market.",
+        "Where global events become investment edge.",
+        "News intelligence. Financial precision."
+    ];
+    var el = document.getElementById("typewriter-text");
+    var cur = 0, charIdx = 0, deleting = false;
+
+    function type(){
+        var phrase = phrases[cur];
+        if(!deleting){
+            el.textContent = phrase.slice(0, charIdx + 1);
+            charIdx++;
+            if(charIdx === phrase.length){ deleting = true; setTimeout(type, 5000); return; }
+            setTimeout(type, 65);
+        } else {
+            el.textContent = phrase.slice(0, charIdx - 1);
+            charIdx--;
+            if(charIdx === 0){ deleting = false; cur = (cur + 1) % phrases.length; setTimeout(type, 500); return; }
+            setTimeout(type, 30);
+        }
+    }
+    type();
+})();
+</script>
+
+<script>
+(function(){
+    var cards = document.querySelectorAll(".stat-card[data-count]");
+    if(!cards.length) return;
+    function animateCount(card){
+        var target = parseInt(card.getAttribute("data-count"), 10);
+        var suffix = card.getAttribute("data-suffix") || "";
+        var el = card.querySelector("strong"); if(!el) return;
+        var startTime = null;
+        function step(ts){ if(!startTime) startTime=ts; var p=Math.min((ts-startTime)/1400,1); var ease=1-Math.pow(1-p,3); el.textContent=Math.round(target*ease)+suffix; if(p<1) requestAnimationFrame(step); }
+        requestAnimationFrame(step);
+    }
+    var obs = new IntersectionObserver(function(entries){
+        entries.forEach(function(e){ if(e.isIntersecting && !e.target.classList.contains("counted")){ e.target.classList.add("counted"); animateCount(e.target); } });
+    }, { threshold: 0.4 });
+    cards.forEach(function(c){ obs.observe(c); });
+})();
+</script>
+
+<script>
+document.querySelector("form").addEventListener("submit", function(){
+    var btn = document.getElementById("submitBtn");
+    btn.textContent = "Analysing...";
+    btn.style.opacity = "0.75";
+    if(window.showToast) showToast("Generating recommendation...", "info");
+});
+</script>
+
+<!-- PREDICTION HISTORY -->
+<section class="panel" style="margin-top:0" id="historySection">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div>
+            <p class="eyebrow">Prediction log</p>
+            <h2 style="margin-bottom:0">Recent recommendations</h2>
+        </div>
+        <button onclick="clearHistory()" class="secondary-button" style="font-size:12px;padding:7px 14px">Clear history</button>
+    </div>
+    <div id="historyList">
+        <p class="meta" id="historyEmpty">No predictions generated yet. Use the scenario builder above to get started.</p>
+    </div>
+</section>
+
+<script>
+var HISTORY_KEY = "gf_prediction_history";
+
+function loadHistory(){
+    try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); } catch(e){ return []; }
+}
+
+function saveHistory(h){
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(h.slice(0,10))); } catch(e){}
+}
+
+function renderHistory(){
+    var history = loadHistory();
+    var list = document.getElementById("historyList");
+    if(!history.length){
+        list.innerHTML = '<p class="meta">No predictions generated yet. Use the scenario builder above to get started.</p>';
+        return;
+    }
+    list.innerHTML = history.map(function(item){
+        var riskColor = item.risk==="High" ? "var(--rose)" : item.risk==="Medium" ? "var(--accent)" : "var(--success)";
+        return '<div style="padding:14px 16px;border-radius:12px;background:rgba(255,255,255,0.25);border:1px solid rgba(255,255,255,0.4);margin-bottom:10px">'
+            + '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">'
+            + '<p style="font-size:13.5px;font-weight:700;color:var(--success);flex:1">' + item.recommendation + '</p>'
+            + (item.confidence ? '<span style="font-size:11px;padding:3px 9px;border-radius:999px;background:rgba(109,94,252,0.1);color:var(--accent-2);font-weight:600">' + item.confidence + '% confidence</span>' : '')
+            + '</div>'
+            + '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">'
+            + '<span style="font-size:11px;padding:3px 9px;border-radius:999px;background:rgba(220,50,80,0.08);color:' + riskColor + ';border:1px solid ' + riskColor + '40">Risk: ' + item.risk + '</span>'
+            + '<span style="font-size:11px;padding:3px 9px;border-radius:999px;background:rgba(109,94,252,0.08);color:var(--accent-2);border:1px solid rgba(109,94,252,0.2)">Sentiment: ' + item.sentiment + '</span>'
+            + '<span style="font-size:11px;color:var(--muted);margin-left:auto">' + item.time + '</span>'
+            + '</div></div>';
+    }).join("");
+}
+
+function clearHistory(){
+    localStorage.removeItem(HISTORY_KEY);
+    renderHistory();
+    if(window.showToast) showToast("History cleared", "info");
+}
+
+{% if prediction %}
+(function(){
+    var history = loadHistory();
+    var entry = {
+        recommendation: {{ prediction | tojson }},
+        confidence: {{ confidence | tojson }},
+        risk: {{ selection.risk | tojson }},
+        sentiment: {{ selection.sentiment | tojson }},
+        time: new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}) + " · " + new Date().toLocaleDateString("en-IN",{day:"numeric",month:"short"})
+    };
+    history.unshift(entry);
+    saveHistory(history);
+})();
+{% endif %}
+
+renderHistory();
+</script>
+
+{% endblock %}

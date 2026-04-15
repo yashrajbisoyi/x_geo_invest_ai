@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero">
+    <p class="eyebrow">Latest processed articles</p>
+    <h1>News Feed</h1>
+    <p class="lede">Source-aware pipeline from verified news domains, enriched with geopolitical risk and investment tags.</p>
+</section>
+
+<section class="hero">
+    <p class="eyebrow">Live News Feed</p>
+    <h2>Live headlines with investment recommendations</h2>
+    <p class="lede">Recent headlines fetched from your configured news provider, tagged on the fly.</p>
+    <p id="liveNewsStatus" class="meta">Fetching live news...</p>
+</section>
+
+<section id="liveNewsList" class="news-list">
+    <article class="result">
+        <div class="skeleton skeleton-title" style="width:70%"></div>
+        <div class="skeleton skeleton-text" style="width:40%"></div>
+        <div class="skeleton skeleton-block"></div>
+        <div class="skeleton skeleton-text" style="width:55%"></div>
+    </article>
+    <article class="result">
+        <div class="skeleton skeleton-title" style="width:60%"></div>
+        <div class="skeleton skeleton-text" style="width:35%"></div>
+        <div class="skeleton skeleton-block"></div>
+        <div class="skeleton skeleton-text" style="width:50%"></div>
+    </article>
+    <article class="result">
+        <div class="skeleton skeleton-title" style="width:75%"></div>
+        <div class="skeleton skeleton-text" style="width:45%"></div>
+        <div class="skeleton skeleton-block"></div>
+        <div class="skeleton skeleton-text" style="width:40%"></div>
+    </article>
+</section>
+
+{% if articles %}
+<section class="news-list">
+    {% for article in articles %}
+    <article class="result">
+        <h2>{{ article.title }}</h2>
+        <p class="meta">{{ article.source }} | {{ article.published }}</p>
+        <p>{{ article.content }}</p>
+        <p class="tag-row">
+            <span class="tag">Risk: {{ article.risk }}</span>
+            <span class="tag">Sentiment: {{ article.sentiment }}</span>
+            <span class="tag">Dataset: {{ article.dataset_type }}</span>
+        </p>
+        {% if article.matched_keywords %}
+        <p class="meta">Matched keywords: {{ article.matched_keywords }}</p>
+        {% endif %}
+    </article>
+    {% endfor %}
+</section>
+{% else %}
+<article class="result" style="margin-top:0">
+    <h2>No processed articles available</h2>
+    <p>The pipeline will populate this section after extraction and preprocessing runs.</p>
+</article>
+{% endif %}
+
+<script>
+function renderLiveNews(articles) {
+    var container = document.getElementById("liveNewsList");
+    if (!articles || articles.length === 0) {
+        container.innerHTML = '<article class="result"><h2>No live news available</h2><p>The app could not load live news right now.</p></article>';
+        return;
+    }
+    container.innerHTML = articles.map(function(article) {
+        var riskClass = article.risk === "High" ? "style='color:var(--rose)'" : article.risk === "Medium" ? "style='color:var(--accent)'" : "";
+        return '<article class="result" style="animation:fadeInUp 0.4s ease both">' +
+            '<h2>' + article.title + '</h2>' +
+            '<p class="meta">' + article.source + ' | ' + (article.author||"Unknown") + ' | ' + (article.published||"") + '</p>' +
+            '<p>' + article.content + '</p>' +
+            '<p class="tag-row">' +
+                '<span class="tag" ' + riskClass + '>Risk: ' + article.risk + '</span>' +
+                '<span class="tag">Sentiment: ' + article.sentiment + '</span>' +
+                '<span class="tag" style="color:var(--success)">→ ' + article.recommendation + '</span>' +
+            '</p>' +
+            (article.confidence != null ? '<p class="meta">Historical confidence: <strong>' + article.confidence + '%</strong></p>' : '') +
+            (article.url ? '<p class="meta"><a href="' + article.url + '" target="_blank" rel="noopener noreferrer" style="color:var(--accent-2)">Open source →</a></p>' : '') +
+        '</article>';
+    }).join("");
+}
+
+function fetchLiveNews() {
+    fetch("/api/live-news")
+        .then(function(res){ return res.json(); })
+        .then(function(data) {
+            document.getElementById("liveNewsStatus").innerText =
+                "Live news: " + (data.debug&&data.debug.status||"unknown") +
+                " · provider: " + (data.debug&&data.debug.provider||"unknown") +
+                " · cache: " + (data.cache||"unknown");
+            renderLiveNews(data.articles||[]);
+            if (window.showToast) showToast("Live news refreshed", "success");
+        })
+        .catch(function(){
+            document.getElementById("liveNewsStatus").innerText = "Live news: request failed";
+            renderLiveNews([]);
+            if (window.showToast) showToast("Live news unavailable", "error");
+        });
+}
+
+fetchLiveNews();
+setInterval(fetchLiveNews, 120000);
+</script>
+
+<style>
+@keyframes fadeInUp {
+    from { opacity:0; transform:translateY(12px); }
+    to   { opacity:1; transform:translateY(0); }
+}
+</style>
+
+{% endblock %}

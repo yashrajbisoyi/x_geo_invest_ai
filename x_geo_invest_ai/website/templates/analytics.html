@@ -1,0 +1,469 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero">
+    <p class="eyebrow">Dataset analytics</p>
+    <h1>Project Signals</h1>
+    <p class="lede">How the dataset is distributed across risk, sentiment, and investment recommendations.</p>
+    {% if summary.active_dataset_path %}
+    <p class="meta">Active runtime dataset: <code>{{ summary.active_dataset_path }}</code></p>
+    {% endif %}
+</section>
+
+{% if summary.total_articles %}
+<section class="stats-row">
+    <article class="stat-card" data-count="{{ summary.total_articles }}" data-suffix="">
+        <span>Total articles</span>
+        <strong>{{ summary.total_articles }}</strong>
+    </article>
+    <article class="stat-card" data-count="{{ summary.combo_consistency }}" data-suffix="%">
+        <span>Rule consistency</span>
+        <strong>{{ summary.combo_consistency }}%</strong>
+    </article>
+    <article class="stat-card" data-count="{{ summary.dataset_type_counts | length }}" data-suffix="">
+        <span>Dataset groups</span>
+        <strong>{{ summary.dataset_type_counts | length }}</strong>
+    </article>
+</section>
+
+<section class="result-grid">
+    <article class="result">
+        <h2>Risk distribution</h2>
+        <canvas id="riskChart"></canvas>
+    </article>
+    <article class="result">
+        <h2>Sentiment distribution</h2>
+        <canvas id="sentimentChart"></canvas>
+    </article>
+    <article class="result">
+        <h2>Dataset mix</h2>
+        <canvas id="datasetTypeChart"></canvas>
+    </article>
+    <article class="result">
+        <h2>Source distribution</h2>
+        <canvas id="sourceChart"></canvas>
+    </article>
+    <article class="result result-wide">
+        <h2>Recommendation frequency</h2>
+        <canvas id="recommendationChart"></canvas>
+    </article>
+</section>
+
+<!-- COUNTRY RISK SEARCH -->
+<section class="panel" style="margin-top:0">
+    <h2 style="margin-bottom:4px">Country geopolitical risk search</h2>
+    <p class="meta" style="margin-bottom:16px">
+        Search for a specific country and view its geopolitical risk heatmap across the main risk categories.
+    </p>
+    <div style="display:grid;grid-template-columns:minmax(0,1.2fr) auto;gap:12px;align-items:end;margin-bottom:18px">
+        <div>
+            <label for="countrySearch" style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">Country search</label>
+            <input id="countrySearch" type="text" placeholder="Search any country, e.g. India, Russia, USA, China"
+                   style="width:100%;padding:14px 16px;border-radius:14px;border:1px solid rgba(109,94,252,0.24);background:rgba(255,255,255,0.06);color:var(--text);outline:none">
+        </div>
+        <button id="countrySearchBtn" type="button" class="secondary-button" style="height:50px">Search</button>
+    </div>
+    <div id="countrySearchHint" class="meta" style="margin-bottom:14px">
+        Try: Bangladesh, New Zealand, India, United States, Russia, China, Japan, South Africa, Brazil, Canada
+    </div>
+    <div id="countrySearchStatus" class="meta" style="margin-bottom:16px"></div>
+    <div id="countryHeatmapResult"></div>
+    <div class="map-legend" style="margin-top:16px">
+        <span style="font-size:11px;color:var(--muted);margin-right:8px;text-transform:uppercase;letter-spacing:0.08em">Risk level:</span>
+        <div class="legend-item"><span class="legend-dot" style="background:rgba(15,159,110,0.85)"></span>Low — minimal threat</div>
+        <div class="legend-item"><span class="legend-dot" style="background:rgba(255,142,60,0.85)"></span>Medium — elevated concern</div>
+        <div class="legend-item"><span class="legend-dot" style="background:rgba(220,50,80,0.85)"></span>High — active risk</div>
+        <div class="legend-item"><span class="legend-dot" style="background:rgba(160,10,40,0.95)"></span>Critical — severe / ongoing</div>
+    </div>
+</section>
+
+<!-- DATA QUALITY REPORT -->
+<section class="panel" style="margin-top:0">
+    <h2 style="margin-bottom:4px">Data quality report</h2>
+    <p class="meta" style="margin-bottom:18px">Completeness and coverage metrics for the collected dataset.</p>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:18px">
+        <div style="padding:14px;border-radius:12px;background:rgba(15,159,110,0.08);border:1px solid rgba(15,159,110,0.2);text-align:center">
+            <p style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:6px">Date from</p>
+            <p style="font-size:15px;font-weight:700;color:var(--text)">{{ summary.date_range.from if summary.date_range else "N/A" }}</p>
+        </div>
+        <div style="padding:14px;border-radius:12px;background:rgba(15,159,110,0.08);border:1px solid rgba(15,159,110,0.2);text-align:center">
+            <p style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:6px">Date to</p>
+            <p style="font-size:15px;font-weight:700;color:var(--text)">{{ summary.date_range.to if summary.date_range else "N/A" }}</p>
+        </div>
+        <div style="padding:14px;border-radius:12px;background:rgba(109,94,252,0.08);border:1px solid rgba(109,94,252,0.2);text-align:center">
+            <p style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:6px">Missing content</p>
+            <p style="font-size:15px;font-weight:700;color:{% if summary.missing_content_pct > 10 %}var(--rose){% else %}var(--success){% endif %}">{{ summary.missing_content_pct }}%</p>
+        </div>
+        <div style="padding:14px;border-radius:12px;background:rgba(109,94,252,0.08);border:1px solid rgba(109,94,252,0.2);text-align:center">
+            <p style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:6px">Missing title</p>
+            <p style="font-size:15px;font-weight:700;color:{% if summary.missing_title_pct > 10 %}var(--rose){% else %}var(--success){% endif %}">{{ summary.missing_title_pct }}%</p>
+        </div>
+        <div style="padding:14px;border-radius:12px;background:rgba(255,142,60,0.08);border:1px solid rgba(255,142,60,0.2);text-align:center">
+            <p style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:6px">Keyword matched</p>
+            <p style="font-size:15px;font-weight:700;color:var(--accent)">{{ summary.has_keywords_pct }}%</p>
+        </div>
+        <div style="padding:14px;border-radius:12px;background:rgba(255,79,139,0.08);border:1px solid rgba(255,79,139,0.2);text-align:center">
+            <p style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:6px">Unique sources</p>
+            <p style="font-size:15px;font-weight:700;color:var(--rose)">{{ summary.verified_sources | length }}</p>
+        </div>
+    </div>
+
+    <div>
+        <p style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:10px">Verified sources in dataset</p>
+        <div style="display:flex;flex-wrap:wrap;gap:7px">
+            {% for source in summary.verified_sources %}
+            <span style="font-size:12px;padding:4px 12px;border-radius:999px;background:rgba(109,94,252,0.08);border:1px solid rgba(109,94,252,0.18);color:var(--accent-2)">{{ source }}</span>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+
+<!-- KEYWORD WORD CLOUD -->
+{% if summary.keyword_freq %}
+<section class="panel" style="margin-top:0">
+    <h2 style="margin-bottom:4px">Keyword frequency — word cloud</h2>
+    <p class="meta" style="margin-bottom:18px">Top 20 geopolitical keywords found in the dataset. Larger = more frequent.</p>
+    <div id="wordCloud" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;padding:10px 0"></div>
+</section>
+{% endif %}
+
+<script>
+var riskCounts           = {{ summary.risk_counts           | tojson }};
+var sentimentCounts      = {{ summary.sentiment_counts      | tojson }};
+var recommendationCounts = {{ summary.recommendation_counts | tojson }};
+var datasetTypeCounts    = {{ summary.dataset_type_counts   | tojson }};
+var sourceCounts         = {{ summary.source_counts         | tojson }};
+
+var palette = [
+    "rgba(109,94,252,0.75)", "rgba(255,79,139,0.75)",
+    "rgba(15,159,110,0.75)", "rgba(255,142,60,0.75)",
+    "rgba(73,186,255,0.75)", "rgba(255,210,90,0.75)"
+];
+
+Chart.defaults.color = getComputedStyle(document.documentElement).getPropertyValue("--muted").trim() || "#5f6481";
+
+new Chart(document.getElementById("riskChart"), {
+    type: "doughnut",
+    data: { labels: Object.keys(riskCounts), datasets: [{ data: Object.values(riskCounts), backgroundColor: palette, borderWidth: 0 }] },
+    options: { plugins: { legend: { position: "bottom" } } }
+});
+
+new Chart(document.getElementById("sentimentChart"), {
+    type: "bar",
+    data: { labels: Object.keys(sentimentCounts), datasets: [{ label: "Articles", data: Object.values(sentimentCounts), backgroundColor: palette, borderRadius: 8, borderWidth: 0 }] },
+    options: { plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } } } }
+});
+
+new Chart(document.getElementById("datasetTypeChart"), {
+    type: "pie",
+    data: { labels: Object.keys(datasetTypeCounts), datasets: [{ data: Object.values(datasetTypeCounts), backgroundColor: palette, borderWidth: 0 }] },
+    options: { plugins: { legend: { position: "bottom" } } }
+});
+
+new Chart(document.getElementById("sourceChart"), {
+    type: "bar",
+    data: { labels: Object.keys(sourceCounts), datasets: [{ label: "Articles", data: Object.values(sourceCounts), backgroundColor: palette, borderRadius: 6, borderWidth: 0 }] },
+    options: { indexAxis: "y", plugins: { legend: { display: false } }, scales: { y: { grid: { display: false } } } }
+});
+
+new Chart(document.getElementById("recommendationChart"), {
+    type: "bar",
+    data: { labels: Object.keys(recommendationCounts), datasets: [{ label: "Rows", data: Object.values(recommendationCounts), backgroundColor: "rgba(109,94,252,0.6)", borderRadius: 6, borderWidth: 0 }] },
+    options: { indexAxis: "y", plugins: { legend: { display: false } }, scales: { y: { grid: { display: false } } } }
+});
+</script>
+
+<script>
+(function(){
+    var categories = ["War", "Sanctions", "Cyber", "Nuclear", "Trade", "Diplomacy"];
+    var catDesc = {
+        "War":       "Active armed conflict risk",
+        "Sanctions": "Economic sanctions & trade restrictions",
+        "Cyber":     "State-sponsored cyberattack risk",
+        "Nuclear":   "Nuclear escalation threat",
+        "Trade":     "Trade war & tariff tensions",
+        "Diplomacy": "Diplomatic breakdown risk"
+    };
+    var regions  = ["Russia", "Iran", "China", "Mid East", "Korea"];
+    var regFlags = { "Russia":"🇷🇺", "Iran":"🇮🇷", "China":"🇨🇳", "Mid East":"🌍", "Korea":"🇰🇷" };
+    var levels   = [
+        [3,3,1,2,1,1],
+        [2,3,1,2,2,0],
+        [1,2,1,1,2,1],
+        [3,1,3,1,0,1],
+        [1,0,0,3,1,0]
+    ];
+    var bgColors  = ["rgba(15,159,110,0.75)","rgba(15,159,110,0.75)","rgba(255,142,60,0.82)","rgba(220,50,80,0.85)","rgba(160,10,40,0.92)"];
+    var txtLabels = ["Low","Low","Med","High","Crit"];
+    var fullNames = ["Low","Low","Medium","High","Critical"];
+    var animClass = ["","","","hm-high","hm-crit"];
+
+    var countryProfiles = {
+        "india":          { name:"India", flag:"IN", levels:[1,1,1,0,2,1] },
+        "united states":  { name:"United States", flag:"US", levels:[1,2,2,1,2,2] },
+        "usa":            { name:"United States", flag:"US", levels:[1,2,2,1,2,2] },
+        "us":             { name:"United States", flag:"US", levels:[1,2,2,1,2,2] },
+        "russia":         { name:"Russia", flag:"RU", levels:[3,3,1,2,1,1] },
+        "ukraine":        { name:"Ukraine", flag:"UA", levels:[3,2,2,1,1,2] },
+        "china":          { name:"China", flag:"CN", levels:[1,2,1,1,2,1] },
+        "taiwan":         { name:"Taiwan", flag:"TW", levels:[2,1,2,1,2,2] },
+        "iran":           { name:"Iran", flag:"IR", levels:[2,3,1,2,2,0] },
+        "israel":         { name:"Israel", flag:"IL", levels:[3,2,2,1,1,2] },
+        "pakistan":       { name:"Pakistan", flag:"PK", levels:[2,1,1,1,1,1] },
+        "north korea":    { name:"North Korea", flag:"KP", levels:[1,0,0,3,1,0] },
+        "south korea":    { name:"South Korea", flag:"KR", levels:[1,1,1,1,2,1] },
+        "japan":          { name:"Japan", flag:"JP", levels:[0,1,1,1,2,2] },
+        "united kingdom": { name:"United Kingdom", flag:"UK", levels:[0,2,2,0,2,2] },
+        "uk":             { name:"United Kingdom", flag:"UK", levels:[0,2,2,0,2,2] },
+        "germany":        { name:"Germany", flag:"DE", levels:[0,2,1,0,2,2] },
+        "france":         { name:"France", flag:"FR", levels:[0,2,1,1,2,2] },
+        "saudi arabia":   { name:"Saudi Arabia", flag:"SA", levels:[2,1,1,1,2,1] },
+        "uae":            { name:"UAE", flag:"AE", levels:[1,1,1,0,1,2] },
+        "turkey":         { name:"Turkey", flag:"TR", levels:[1,1,1,1,2,2] },
+        "canada":         { name:"Canada", flag:"CA", levels:[0,1,1,0,1,2] },
+        "australia":      { name:"Australia", flag:"AU", levels:[0,1,1,0,1,2] },
+        "brazil":         { name:"Brazil", flag:"BR", levels:[0,1,1,0,1,1] },
+        "mexico":         { name:"Mexico", flag:"MX", levels:[0,1,2,0,1,1] }
+    };
+    var regionProfiles = {
+        "south_asia":      { levels:[1,1,1,0,1,1], flag:"SA" },
+        "east_asia":       { levels:[1,1,1,1,2,1], flag:"EA" },
+        "middle_east":     { levels:[2,2,1,1,1,1], flag:"ME" },
+        "europe":          { levels:[0,1,1,0,2,2], flag:"EU" },
+        "north_america":   { levels:[0,1,1,0,1,2], flag:"NA" },
+        "south_america":   { levels:[0,1,1,0,1,1], flag:"SA" },
+        "africa":          { levels:[1,1,1,0,1,1], flag:"AF" },
+        "oceania":         { levels:[0,1,1,0,1,2], flag:"OC" },
+        "central_asia":    { levels:[1,1,1,1,1,1], flag:"CA" },
+        "southeast_asia":  { levels:[1,1,1,0,1,1], flag:"SEA" }
+    };
+    var countryToRegion = {
+        "bangladesh":"south_asia","bhutan":"south_asia","nepal":"south_asia","sri lanka":"south_asia","maldives":"south_asia","afghanistan":"south_asia",
+        "new zealand":"oceania","fiji":"oceania","papua new guinea":"oceania","samoa":"oceania",
+        "indonesia":"southeast_asia","malaysia":"southeast_asia","singapore":"southeast_asia","thailand":"southeast_asia","vietnam":"southeast_asia","philippines":"southeast_asia","cambodia":"southeast_asia","laos":"southeast_asia","myanmar":"southeast_asia","brunei":"southeast_asia","timor leste":"southeast_asia",
+        "kazakhstan":"central_asia","uzbekistan":"central_asia","turkmenistan":"central_asia","kyrgyzstan":"central_asia","tajikistan":"central_asia","mongolia":"central_asia",
+        "poland":"europe","italy":"europe","spain":"europe","portugal":"europe","netherlands":"europe","belgium":"europe","sweden":"europe","norway":"europe","finland":"europe","denmark":"europe","switzerland":"europe","austria":"europe","czech republic":"europe","czechia":"europe","romania":"europe","greece":"europe","hungary":"europe","ireland":"europe","uk":"europe","united kingdom":"europe",
+        "egypt":"africa","south africa":"africa","nigeria":"africa","kenya":"africa","ethiopia":"africa","morocco":"africa","algeria":"africa","tunisia":"africa","ghana":"africa",
+        "argentina":"south_america","chile":"south_america","colombia":"south_america","peru":"south_america","uruguay":"south_america","paraguay":"south_america","bolivia":"south_america","ecuador":"south_america","venezuela":"south_america",
+        "guatemala":"north_america","costa rica":"north_america","panama":"north_america","cuba":"north_america","dominican republic":"north_america","jamaica":"north_america",
+        "qatar":"middle_east","kuwait":"middle_east","oman":"middle_east","bahrain":"middle_east","jordan":"middle_east","lebanon":"middle_east","iraq":"middle_east","syria":"middle_east","yemen":"middle_east",
+        "hong kong":"east_asia","macau":"east_asia"
+    };
+    var countryAliases = {
+        "u.s.a":"usa","u.s":"us","united states of america":"united states","america":"united states",
+        "u.k":"uk","great britain":"united kingdom","england":"united kingdom",
+        "uae":"uae","u.a.e":"uae",
+        "south korea":"south korea","republic of korea":"south korea","north korea":"north korea","dprk":"north korea",
+        "russian federation":"russia",
+        "peoples republic of china":"china","pr china":"china",
+        "islamic republic of iran":"iran",
+        "bangla desh":"bangladesh","new-zealand":"new zealand"
+    };
+    var searchInput = document.getElementById("countrySearch");
+    var searchBtn = document.getElementById("countrySearchBtn");
+    var statusEl = document.getElementById("countrySearchStatus");
+    var resultEl = document.getElementById("countryHeatmapResult");
+
+    function normalizeCountry(value){
+        return String(value || "")
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9\s-]/g, " ")
+            .replace(/-/g, " ")
+            .replace(/\s+/g, " ");
+    }
+
+    function titleCase(value){
+        return String(value || "").replace(/\b\w/g, function(char){ return char.toUpperCase(); });
+    }
+
+    function resolveCountryProfile(rawValue){
+        var key = normalizeCountry(rawValue);
+        key = countryAliases[key] || key;
+
+        if(countryProfiles[key]){
+            return countryProfiles[key];
+        }
+
+        var regionKey = countryToRegion[key];
+        if(regionKey && regionProfiles[regionKey]){
+            return {
+                name: titleCase(key),
+                flag: regionProfiles[regionKey].flag,
+                levels: regionProfiles[regionKey].levels
+            };
+        }
+
+        if(key){
+            return {
+                name: titleCase(key),
+                flag: "GL",
+                levels: [1,1,1,0,1,1]
+            };
+        }
+
+        return null;
+    }
+
+    function highestRiskLabel(levels){
+        var max = Math.max.apply(null, levels);
+        return fullNames[max];
+    }
+
+    function renderCountry(profile){
+        statusEl.textContent = "Showing geopolitical risk heatmap for " + profile.name + ".";
+        resultEl.innerHTML =
+            '<div style="padding:16px 18px;border-radius:18px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);margin-bottom:14px">'
+                + '<div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;align-items:center">'
+                    + '<div>'
+                        + '<p style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px">Selected country</p>'
+                        + '<h3 style="font-size:28px;line-height:1.1;margin:0;color:var(--text)">' + profile.flag + ' ' + profile.name + '</h3>'
+                    + '</div>'
+                    + '<div style="padding:10px 14px;border-radius:999px;background:rgba(109,94,252,0.08);border:1px solid rgba(109,94,252,0.18);color:var(--accent-2);font-size:12px;font-weight:700">Highest signal: ' + highestRiskLabel(profile.levels) + '</div>'
+                + '</div>'
+            + '</div>'
+            + '<div id="countryHeatmapGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px"></div>';
+
+        var grid = document.getElementById("countryHeatmapGrid");
+        profile.levels.forEach(function(lvl, idx){
+            var card = document.createElement("div");
+            card.style.cssText = "background:" + bgColors[lvl] + ";border-radius:16px;padding:18px 14px;text-align:center;transition:transform 0.15s,filter 0.15s;cursor:default;";
+            card.innerHTML =
+                '<div style="font-size:12px;color:rgba(255,255,255,0.78);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">' + categories[idx] + '</div>'
+                + '<div style="font-size:29px;font-weight:800;color:white;line-height:1">' + txtLabels[lvl] + '</div>'
+                + '<div style="font-size:12px;color:rgba(255,255,255,0.82);margin-top:10px">' + catDesc[categories[idx]] + '</div>';
+            if(animClass[lvl]) card.style.animation = lvl === 4 ? "hm-pulse 0.9s ease-in-out infinite" : "hm-pulse 1.6s ease-in-out infinite";
+            card.title = profile.name + " | " + categories[idx] + " | Risk level: " + fullNames[lvl];
+            card.addEventListener("mouseover", function(){ this.style.transform = "translateY(-2px) scale(1.02)"; this.style.filter = "brightness(1.08)"; });
+            card.addEventListener("mouseout", function(){ this.style.transform = ""; this.style.filter = ""; });
+            grid.appendChild(card);
+        });
+    }
+
+    function performCountrySearch(){
+        var profile = resolveCountryProfile(searchInput.value);
+        if(!profile){
+            resultEl.innerHTML = "";
+            statusEl.textContent = "Enter a country name to view its geopolitical risk heatmap.";
+            return;
+        }
+        renderCountry(profile);
+    }
+
+    if(searchInput && searchBtn && statusEl && resultEl){
+        searchBtn.addEventListener("click", performCountrySearch);
+        searchInput.addEventListener("keydown", function(event){
+            if(event.key === "Enter"){
+                event.preventDefault();
+                performCountrySearch();
+            }
+        });
+        searchInput.value = "India";
+        renderCountry(resolveCountryProfile("India"));
+        return;
+    }
+
+    var wrap  = document.getElementById("heatmapTable");
+    var table = document.createElement("table");
+    table.style.cssText = "width:100%;border-collapse:separate;border-spacing:5px;table-layout:fixed";
+
+    var thead = document.createElement("thead");
+    var hrow  = document.createElement("tr");
+    var corner = document.createElement("th");
+    corner.style.cssText = "width:80px;padding:6px 4px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;text-align:left;vertical-align:bottom";
+    corner.textContent = "Region ↓  Risk →";
+    hrow.appendChild(corner);
+
+    categories.forEach(function(cat){
+        var th = document.createElement("th");
+        th.style.cssText = "padding:6px 4px;font-size:11px;font-weight:700;color:var(--text);text-align:center;letter-spacing:0.04em;vertical-align:bottom;line-height:1.3";
+        th.title = catDesc[cat] || cat;
+        th.innerHTML = cat + '<div style="font-size:9px;font-weight:400;color:var(--muted);margin-top:2px">▼</div>';
+        hrow.appendChild(th);
+    });
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+
+    var tbody = document.createElement("tbody");
+    regions.forEach(function(reg, ri){
+        var tr = document.createElement("tr");
+        var th = document.createElement("th");
+        th.style.cssText = "padding:4px 8px 4px 2px;font-size:12px;font-weight:600;color:var(--text);text-align:left;white-space:nowrap;vertical-align:middle";
+        th.innerHTML = '<span style="margin-right:5px">' + (regFlags[reg]||"") + '</span>' + reg;
+        tr.appendChild(th);
+
+        levels[ri].forEach(function(lvl, ci){
+            var td   = document.createElement("td");
+            td.style.cssText = "padding:0;border-radius:10px;overflow:hidden;";
+            var cell = document.createElement("div");
+            cell.style.cssText = "background:" + bgColors[lvl] + ";border-radius:10px;padding:14px 6px;text-align:center;cursor:default;transition:transform 0.15s,filter 0.15s;";
+            cell.innerHTML = '<div style="font-size:12px;font-weight:800;color:white;letter-spacing:0.04em">' + txtLabels[lvl] + '</div>'
+                + '<div style="font-size:9px;color:rgba(255,255,255,0.75);margin-top:3px;letter-spacing:0.03em">' + categories[ci] + '</div>';
+            if(animClass[lvl]) cell.style.animation = lvl===4 ? "hm-pulse 0.9s ease-in-out infinite" : "hm-pulse 1.6s ease-in-out infinite";
+            cell.title = reg + " · " + categories[ci] + "\nRisk level: " + fullNames[lvl] + "\n" + (catDesc[categories[ci]]||"");
+            cell.addEventListener("mouseover", function(){ this.style.transform="scale(1.08)"; this.style.filter="brightness(1.15)"; this.style.zIndex="5"; });
+            cell.addEventListener("mouseout",  function(){ this.style.transform=""; this.style.filter=""; this.style.zIndex=""; });
+            td.appendChild(cell);
+            tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+})();
+</script>
+
+<script>
+(function(){
+    var cards = document.querySelectorAll(".stat-card[data-count]");
+    if(!cards.length) return;
+    function animateCount(card){
+        var target = parseInt(card.getAttribute("data-count"), 10);
+        var suffix = card.getAttribute("data-suffix") || "";
+        var el = card.querySelector("strong"); if(!el) return;
+        var startTime = null;
+        function step(ts){ if(!startTime) startTime=ts; var p=Math.min((ts-startTime)/1400,1); var ease=1-Math.pow(1-p,3); el.textContent=Math.round(target*ease)+suffix; if(p<1) requestAnimationFrame(step); }
+        requestAnimationFrame(step);
+    }
+    var obs = new IntersectionObserver(function(entries){
+        entries.forEach(function(e){ if(e.isIntersecting && !e.target.classList.contains("counted")){ e.target.classList.add("counted"); animateCount(e.target); } });
+    }, { threshold: 0.4 });
+    cards.forEach(function(c){ obs.observe(c); });
+})();
+</script>
+
+{% if summary.keyword_freq %}
+<script>
+(function(){
+    var freq = {{ summary.keyword_freq | tojson }};
+    var entries = Object.entries(freq).sort(function(a,b){ return b[1]-a[1]; });
+    if(!entries.length) return;
+    var maxVal = entries[0][1];
+    var minVal = entries[entries.length-1][1];
+    var colors = ["#6d5efc","#ff4f8b","#0f9f6e","#ff8e3c","#3b82f6","#a855f7"];
+    var container = document.getElementById("wordCloud");
+    entries.forEach(function(entry, i){
+        var word = entry[0], count = entry[1];
+        var ratio = maxVal === minVal ? 0.5 : (count - minVal) / (maxVal - minVal);
+        var size  = Math.round(12 + ratio * 24);
+        var opacity = 0.55 + ratio * 0.45;
+        var span = document.createElement("span");
+        span.textContent = word;
+        span.title = word + ": " + count + " articles";
+        span.style.cssText = "font-size:" + size + "px;font-weight:" + (ratio > 0.5 ? "700" : "500") + ";color:" + colors[i % colors.length] + ";opacity:" + opacity.toFixed(2) + ";cursor:default;transition:transform 0.15s;display:inline-block;padding:2px 4px;";
+        span.addEventListener("mouseenter", function(){ this.style.transform="scale(1.15)"; });
+        span.addEventListener("mouseleave", function(){ this.style.transform="scale(1)"; });
+        container.appendChild(span);
+    });
+})();
+</script>
+{% endif %}
+
+{% else %}
+<article class="result">
+    <h2>No dataset found</h2>
+    <p>The analytics view needs <code>final_investment_recommendations.csv</code> to be present in the project root.</p>
+</article>
+{% endif %}
+{% endblock %}

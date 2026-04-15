@@ -1,0 +1,125 @@
+{
+  "dataset_path": "C:\\Users\\KIIT\\Downloads\\x_geo_invest_ai\\x_geo_invest_ai\\x_geo_invest_ai\\data\\processed\\runtime_combined_news.csv",
+  "dataset_rows": 615,
+  "train_rows": 461,
+  "test_rows": 154,
+  "trained_at": "2026-04-15T12:04:20Z",
+  "best_model": "svm_linear",
+  "accuracy": 0.9935,
+  "f1_weighted": 0.9904,
+  "cv_f1_mean": 0.9976,
+  "cv_f1_std": 0.0048,
+  "training_time_seconds": 0.1871,
+  "prediction_time_seconds": 0.014702,
+  "model_comparison": [
+    {
+      "name": "logistic_regression",
+      "accuracy": 0.987,
+      "f1_weighted": 0.9829,
+      "cv_f1_mean": 0.9909,
+      "cv_f1_std": 0.0089,
+      "training_time_seconds": 0.1593,
+      "prediction_time_seconds": 0.012117
+    },
+    {
+      "name": "complement_naive_bayes",
+      "accuracy": 0.9675,
+      "f1_weighted": 0.9517,
+      "cv_f1_mean": 0.9517,
+      "cv_f1_std": 0.0069,
+      "training_time_seconds": 0.0377,
+      "prediction_time_seconds": 0.012357
+    },
+    {
+      "name": "random_forest",
+      "accuracy": 0.9675,
+      "f1_weighted": 0.9551,
+      "cv_f1_mean": 0.978,
+      "cv_f1_std": 0.012,
+      "training_time_seconds": 0.522,
+      "prediction_time_seconds": 0.034113
+    },
+    {
+      "name": "decision_tree",
+      "accuracy": 0.9935,
+      "f1_weighted": 0.9909,
+      "cv_f1_mean": 0.9949,
+      "cv_f1_std": 0.0102,
+      "training_time_seconds": 0.0468,
+      "prediction_time_seconds": 0.012124
+    },
+    {
+      "name": "svm_linear",
+      "accuracy": 0.9935,
+      "f1_weighted": 0.9904,
+      "cv_f1_mean": 0.9976,
+      "cv_f1_std": 0.0048,
+      "training_time_seconds": 0.1871,
+      "prediction_time_seconds": 0.014702
+    }
+  ],
+  "classification_report": {
+    "Buy Equities, Banking, IT": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 39.0
+    },
+    "Buy Gold & Defence Stocks | Avoid Equities": {
+      "precision": 0.9166666666666666,
+      "recall": 1.0,
+      "f1-score": 0.9565217391304348,
+      "support": 11.0
+    },
+    "Hold Cash | Defensive Stocks": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 14.0
+    },
+    "Hold Gold | Avoid High-Risk Equities": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 2.0
+    },
+    "Market Neutral | Hold Positions": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 85.0
+    },
+    "Selective Equity Buy | Hold Gold": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 2.0
+    },
+    "Strong Buy: Gold, Oil & Energy Stocks | Avoid Equities": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 1.0
+    },
+    "accuracy": 0.9935064935064936,
+    "macro avg": {
+      "precision": 0.8452380952380951,
+      "recall": 0.8571428571428571,
+      "f1-score": 0.8509316770186335,
+      "support": 154.0
+    },
+    "weighted avg": {
+      "precision": 0.9875541125541124,
+      "recall": 0.9935064935064936,
+      "f1-score": 0.9904009034443817,
+      "support": 154.0
+    }
+  },
+  "improvement_notes": [
+    "Increase verified-source coverage and historical depth beyond 90 days.",
+    "Replace rule-generated labels with expert-annotated market truth targets.",
+    "Evaluate transformer-based encoders (FinBERT) for richer geopolitical context.",
+    "Add deep learning models (LSTM, BiLSTM) for sequential news pattern detection.",
+    "Incorporate real-time macro indicators (CPI, interest rates) as structured features."
+  ]
+}
