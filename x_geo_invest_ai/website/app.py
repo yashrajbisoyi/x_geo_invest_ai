@@ -1291,6 +1291,10 @@ def live_data():
         return jsonify(response)
 
 
+@app.route("/")
+def home():
+    return "Geo Investment AI is running 🚀"
+
 if __name__ == "__main__":
     debug_mode = os.getenv("FLASK_DEBUG", "true").lower() == "true"
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)), debug=debug_mode)
