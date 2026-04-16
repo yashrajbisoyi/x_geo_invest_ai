@@ -53,6 +53,11 @@ MARKET_REQUEST_TIMEOUT = float(os.getenv("MARKET_REQUEST_TIMEOUT", "4"))
 MARKET_CACHE_SECONDS = int(os.getenv("MARKET_CACHE_SECONDS", "300"))
 LIVE_NEWS_CACHE_SECONDS = 120
 COUNTRY_MONITOR_CACHE_SECONDS = 600
+DEFAULT_MARKET_FALLBACKS = {
+    "gold": 4800.0,
+    "oil": 100.0,
+    "usdinr": 84.0,
+}
 
 RISK_KEYWORDS = [
     "war", "conflict", "sanction", "missile", "nuclear", "invasion", "military",
@@ -1102,6 +1107,30 @@ def fetch_market_snapshot():
     return data, debug
 
 
+def apply_market_fallbacks(data, debug):
+    previous = market_cache.get("data") or {}
+
+    for label in ("gold", "oil", "nifty", "sensex", "usdinr"):
+        if data.get(label) == "Unavailable" and previous.get(label) not in (None, "Unavailable"):
+            data[label] = previous[label]
+            debug.setdefault(label, {"ticker": label, "status": "ok", "attempts": []})
+            debug[label]["attempts"].append("previous-cache fallback")
+
+    for label in ("gold", "oil"):
+        if data.get(label) == "Unavailable":
+            fallback_value = DEFAULT_MARKET_FALLBACKS[label]
+            data[label] = fallback_value
+            debug.setdefault(label, {"ticker": label, "status": "ok", "attempts": []})
+            debug[label]["attempts"].append(f"hardcoded {label} fallback")
+
+    if data.get("usdinr") == "Unavailable":
+        data["usdinr"] = DEFAULT_MARKET_FALLBACKS["usdinr"]
+        debug.setdefault("fx", {"ticker": "USDINR=X", "status": "ok", "attempts": []})
+        debug["fx"]["attempts"].append("hardcoded usdinr fallback")
+
+    return data, debug
+
+
 def fetch_usdinr_rate():
     attempts = []
     rate = None
@@ -1297,6 +1326,12 @@ def live_data():
             "status": "ok" if usdinr_rate is not None else "unavailable",
             "attempts": fx_attempts,
         }
+        data, debug = apply_market_fallbacks(data, debug)
+        fx_rate_for_display = float(data["usdinr"]) if data.get("usdinr") not in (None, "Unavailable") else DEFAULT_MARKET_FALLBACKS["usdinr"]
+        if "hardcoded gold fallback" in debug.get("gold", {}).get("attempts", []):
+            data["gold"] = round(float(data["gold"]) * fx_rate_for_display, 2)
+        if "hardcoded oil fallback" in debug.get("oil", {}).get("attempts", []):
+            data["oil"] = round(float(data["oil"]) * fx_rate_for_display, 2)
         has_any_success = any(value != "Unavailable" for value in data.values())
 
         if has_any_success:
