@@ -1028,6 +1028,29 @@ def fetch_nse_nifty_price(attempts):
 def fetch_bse_sensex_price(attempts):
     try:
         response = requests.get(
+            "https://api.bseindia.com/RealTimeBseIndiaAPI/api/GetSensexData/w",
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json,text/plain,*/*",
+                "Referer": "https://www.bseindia.com/",
+            },
+            timeout=MARKET_REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        payload = response.json()
+
+        if isinstance(payload, list) and payload:
+            candidate = payload[0].get("ltp")
+            if candidate is not None:
+                attempts.append("bse.realtime_sensex")
+                return round(float(str(candidate).replace(",", "")), 2)
+
+        attempts.append("bse.realtime_sensex returned no price")
+    except Exception as exc:
+        attempts.append(f"bse.realtime_sensex failed: {exc}")
+
+    try:
+        response = requests.get(
             "https://m.bseindia.com/IndicesView.aspx",
             headers={
                 "User-Agent": "Mozilla/5.0",
@@ -1084,12 +1107,22 @@ def fetch_market_snapshot():
     data = {}
     debug = {}
 
-    with ThreadPoolExecutor(max_workers=len(symbols)) as executor:
-        futures = [executor.submit(fetch_market_symbol, label, ticker) for label, ticker in symbols.items()]
+    # Keep Alpha Vantage-backed commodities sequential to avoid free-tier burst limits.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(fetch_market_symbol, label, ticker)
+            for label, ticker in symbols.items()
+            if label in {"nifty", "sensex"}
+        ]
         for future in futures:
             label, price, details = future.result()
             data[label] = price
             debug[label] = details
+
+    for label in ("gold", "oil"):
+        _, price, details = fetch_market_symbol(label, symbols[label])
+        data[label] = price
+        debug[label] = details
 
     return data, debug
 
