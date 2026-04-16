@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -1024,6 +1025,36 @@ def fetch_nse_nifty_price(attempts):
     return None
 
 
+def fetch_bse_sensex_price(attempts):
+    try:
+        response = requests.get(
+            "https://m.bseindia.com/IndicesView.aspx",
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Referer": "https://www.bseindia.com/",
+            },
+            timeout=MARKET_REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        html = response.text
+
+        match = re.search(r'id="UcHeaderMenu1_sensexLtp"[^>]*>\s*([0-9,]+(?:\.\d+)?)\s*<', html)
+        if not match:
+            match = re.search(r'BSE SENSEX</a></td><td[^>]*>\s*([0-9,]+(?:\.\d+)?)\s*<', html, re.IGNORECASE)
+
+        if match:
+            candidate = match.group(1).replace(",", "")
+            attempts.append("bse.indices_mobile")
+            return round(float(candidate), 2)
+
+        attempts.append("bse.indices_mobile returned no SENSEX price")
+    except Exception as exc:
+        attempts.append(f"bse.indices_mobile failed: {exc}")
+
+    return None
+
+
 def fetch_market_symbol(label, ticker):
     attempts = []
     price = fetch_yfinance_price(ticker, attempts)
@@ -1033,6 +1064,8 @@ def fetch_market_symbol(label, ticker):
         price = fetch_alpha_vantage_price(label, attempts)
     if price is None and label == "nifty":
         price = fetch_nse_nifty_price(attempts)
+    if price is None and label == "sensex":
+        price = fetch_bse_sensex_price(attempts)
 
     return label, price if price is not None else "Unavailable", {
         "ticker": ticker,
