@@ -13,7 +13,6 @@ from flask import Flask, jsonify, render_template, request, send_from_directory
 import pandas as pd
 import requests
 from textblob import TextBlob
-import yfinance as yf
 
 load_dotenv()
 
@@ -900,32 +899,8 @@ def build_performance_metrics():
 
 
 def fetch_yfinance_price(ticker, attempts, periods=()):
-    try:
-        ticker_obj = yf.Ticker(ticker)
-        fast_info = getattr(ticker_obj, "fast_info", None)
-        if fast_info:
-            candidate = fast_info.get("lastPrice") or fast_info.get("regularMarketPrice")
-            if candidate is not None:
-                attempts.append("yfinance.fast_info")
-                return round(float(candidate), 2)
-            attempts.append("yfinance.fast_info returned no price")
-    except Exception as exc:
-        attempts.append(f"yfinance.fast_info failed: {exc}")
-        if "Too Many Requests" in str(exc):
-            return None
-
-    for period in periods:
-        try:
-            history = yf.Ticker(ticker).history(period=period, interval="1d", auto_adjust=False)
-            if not history.empty and "Close" in history and not history["Close"].dropna().empty:
-                attempts.append(f"yfinance.history({period},1d)")
-                return round(float(history["Close"].dropna().iloc[-1]), 2)
-            attempts.append(f"yfinance.history({period}) returned empty")
-        except Exception as exc:
-            attempts.append(f"yfinance.history({period}) failed: {exc}")
-            if "Too Many Requests" in str(exc):
-                break
-
+    # yfinance is unreliable on Railway and can block long enough to trigger worker timeouts.
+    attempts.append("yfinance skipped")
     return None
 
 
@@ -1132,17 +1107,48 @@ def fetch_usdinr_rate():
     rate = None
 
     try:
-        ticker_obj = yf.Ticker("USDINR=X")
-        fast_info = getattr(ticker_obj, "fast_info", None)
-        if fast_info:
-            candidate = fast_info.get("lastPrice") or fast_info.get("regularMarketPrice")
+        response = requests.get(
+            "https://query1.finance.yahoo.com/v7/finance/quote",
+            params={"symbols": "USDINR=X"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=MARKET_REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        result = response.json().get("quoteResponse", {}).get("result", [])
+        if result:
+            candidate = result[0].get("regularMarketPrice")
             if candidate is not None and float(candidate) > 10:
                 rate = round(float(candidate), 2)
-                attempts.append(f"yfinance.fast_info(USDINR=X) -> {rate}")
+                attempts.append(f"yahoo.quote(USDINR=X) -> {rate}")
             else:
-                attempts.append(f"yfinance.fast_info(USDINR=X) returned bad value: {candidate}")
+                attempts.append(f"yahoo.quote(USDINR=X) returned bad value: {candidate}")
+        else:
+            attempts.append("yahoo.quote(USDINR=X) returned no rows")
     except Exception as exc:
-        attempts.append(f"yfinance.fast_info(USDINR=X) failed: {exc}")
+        attempts.append(f"yahoo.quote(USDINR=X) failed: {exc}")
+
+    if rate is None and ALPHA_VANTAGE_API_KEY:
+        try:
+            response = requests.get(
+                "https://www.alphavantage.co/query",
+                params={
+                    "function": "CURRENCY_EXCHANGE_RATE",
+                    "from_currency": "USD",
+                    "to_currency": "INR",
+                    "apikey": ALPHA_VANTAGE_API_KEY,
+                },
+                timeout=MARKET_REQUEST_TIMEOUT,
+            )
+            response.raise_for_status()
+            payload = response.json().get("Realtime Currency Exchange Rate", {})
+            candidate = payload.get("5. Exchange Rate")
+            if candidate is not None and float(candidate) > 10:
+                rate = round(float(candidate), 2)
+                attempts.append(f"alpha_vantage.fx(USDINR) -> {rate}")
+            else:
+                attempts.append(f"alpha_vantage.fx(USDINR) returned bad value: {candidate}")
+        except Exception as exc:
+            attempts.append(f"alpha_vantage.fx(USDINR) failed: {exc}")
 
     if rate is None:
         rate = 84.0
