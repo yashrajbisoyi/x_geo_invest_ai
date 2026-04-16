@@ -1,4 +1,5 @@
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import json
 import os
@@ -48,7 +49,8 @@ NEWSDATA_API_KEY = os.getenv("NEWSDATA_API_KEY") or os.getenv("NEWS_API_KEY")
 market_cache = {"data": None, "timestamp": 0, "debug": {}}
 x_news_cache = {"data": None, "timestamp": 0, "debug": {}}
 country_news_cache = {}
-MARKET_CACHE_SECONDS = 60
+MARKET_REQUEST_TIMEOUT = float(os.getenv("MARKET_REQUEST_TIMEOUT", "4"))
+MARKET_CACHE_SECONDS = int(os.getenv("MARKET_CACHE_SECONDS", "300"))
 LIVE_NEWS_CACHE_SECONDS = 120
 COUNTRY_MONITOR_CACHE_SECONDS = 600
 
@@ -896,144 +898,165 @@ def build_performance_metrics():
     return base_metrics
 
 
+def fetch_yfinance_price(ticker, attempts, periods=()):
+    try:
+        ticker_obj = yf.Ticker(ticker)
+        fast_info = getattr(ticker_obj, "fast_info", None)
+        if fast_info:
+            candidate = fast_info.get("lastPrice") or fast_info.get("regularMarketPrice")
+            if candidate is not None:
+                attempts.append("yfinance.fast_info")
+                return round(float(candidate), 2)
+            attempts.append("yfinance.fast_info returned no price")
+    except Exception as exc:
+        attempts.append(f"yfinance.fast_info failed: {exc}")
+        if "Too Many Requests" in str(exc):
+            return None
+
+    for period in periods:
+        try:
+            history = yf.Ticker(ticker).history(period=period, interval="1d", auto_adjust=False)
+            if not history.empty and "Close" in history and not history["Close"].dropna().empty:
+                attempts.append(f"yfinance.history({period},1d)")
+                return round(float(history["Close"].dropna().iloc[-1]), 2)
+            attempts.append(f"yfinance.history({period}) returned empty")
+        except Exception as exc:
+            attempts.append(f"yfinance.history({period}) failed: {exc}")
+            if "Too Many Requests" in str(exc):
+                break
+
+    return None
+
+
+def fetch_yahoo_quote_price(ticker, attempts):
+    try:
+        response = requests.get(
+            "https://query1.finance.yahoo.com/v7/finance/quote",
+            params={"symbols": ticker},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=MARKET_REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        result = response.json().get("quoteResponse", {}).get("result", [])
+        if result:
+            candidate = result[0].get("regularMarketPrice")
+            if candidate is not None:
+                attempts.append("yahoo.quote")
+                return round(float(candidate), 2)
+        attempts.append("yahoo.quote returned no price")
+    except Exception as exc:
+        attempts.append(f"yahoo.quote failed: {exc}")
+    return None
+
+
+def fetch_alpha_vantage_price(label, attempts):
+    if not ALPHA_VANTAGE_API_KEY or label not in {"gold", "oil"}:
+        return None
+
+    try:
+        if label == "gold":
+            response = requests.get(
+                "https://www.alphavantage.co/query",
+                params={
+                    "function": "GOLD_SILVER_SPOT",
+                    "symbol": "GOLD",
+                    "apikey": ALPHA_VANTAGE_API_KEY,
+                },
+                timeout=MARKET_REQUEST_TIMEOUT,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            candidate = payload.get("price")
+            if candidate is not None:
+                attempts.append("alpha_vantage.gold_spot")
+                return round(float(candidate), 2)
+            attempts.append("alpha_vantage.gold_spot returned no price")
+            return None
+
+        response = requests.get(
+            "https://www.alphavantage.co/query",
+            params={
+                "function": "BRENT",
+                "interval": "daily",
+                "apikey": ALPHA_VANTAGE_API_KEY,
+            },
+            timeout=MARKET_REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        rows = payload.get("data", [])
+        if rows:
+            candidate = rows[0].get("value")
+            if candidate is not None:
+                attempts.append("alpha_vantage.brent")
+                return round(float(candidate), 2)
+        attempts.append("alpha_vantage.brent returned no price")
+    except Exception as exc:
+        attempts.append(f"alpha_vantage failed: {exc}")
+
+    return None
+
+
+def fetch_nse_nifty_price(attempts):
+    try:
+        response = requests.get(
+            "https://www.nseindia.com/api/allIndices",
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json",
+                "Referer": "https://www.nseindia.com/",
+            },
+            timeout=MARKET_REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        for item in payload.get("data", []):
+            if item.get("index") == "NIFTY 50":
+                candidate = item.get("last")
+                if candidate is not None:
+                    attempts.append("nse.allIndices")
+                    return round(float(candidate), 2)
+                break
+        attempts.append("nse.allIndices returned no NIFTY price")
+    except Exception as exc:
+        attempts.append(f"nse.allIndices failed: {exc}")
+
+    return None
+
+
+def fetch_market_symbol(label, ticker):
+    attempts = []
+    price = fetch_yfinance_price(ticker, attempts)
+    if price is None:
+        price = fetch_yahoo_quote_price(ticker, attempts)
+    if price is None:
+        price = fetch_alpha_vantage_price(label, attempts)
+    if price is None and label == "nifty":
+        price = fetch_nse_nifty_price(attempts)
+
+    return label, price if price is not None else "Unavailable", {
+        "ticker": ticker,
+        "status": "ok" if price is not None else "unavailable",
+        "attempts": attempts,
+    }
+
+
 def fetch_market_snapshot():
     symbols = {
-        "gold":   {"yahoo": "GC=F"},
-        "oil":    {"yahoo": "BZ=F"},
-        "nifty":  {"yahoo": "^NSEI"},
-        "sensex": {"yahoo": "^BSESN"},
+        "gold": "GC=F",
+        "oil": "BZ=F",
+        "nifty": "^NSEI",
+        "sensex": "^BSESN",
     }
     data = {}
     debug = {}
 
-    for label, source_map in symbols.items():
-        ticker = source_map["yahoo"]
-        price = None
-        attempts = []
-
-        try:
-            ticker_obj = yf.Ticker(ticker)
-            fast_info = getattr(ticker_obj, "fast_info", None)
-            if fast_info:
-                candidate = fast_info.get("lastPrice") or fast_info.get("regularMarketPrice")
-                if candidate is not None:
-                    price = round(float(candidate), 2)
-                    attempts.append("yfinance.fast_info")
-        except Exception as exc:
-            attempts.append(f"yfinance.fast_info failed: {exc}")
-
-        rate_limited = any("Too Many Requests" in attempt for attempt in attempts)
-
-        if price is None and not rate_limited:
-            for period in ("1d", "5d", "1mo"):
-                try:
-                    iv = "1m" if period == "1d" else "1d"
-                    history = yf.Ticker(ticker).history(period=period, interval=iv, auto_adjust=False)
-                    if not history.empty and "Close" in history and not history["Close"].dropna().empty:
-                        price = round(float(history["Close"].dropna().iloc[-1]), 2)
-                        attempts.append(f"yfinance.history({period},{iv})")
-                        break
-                    attempts.append(f"yfinance.history({period}) returned empty")
-                except Exception as exc:
-                    attempts.append(f"yfinance.history({period}) failed: {exc}")
-                if attempts and "Too Many Requests" in attempts[-1]:
-                    rate_limited = True
-                    break
-
-        if price is None and not rate_limited:
-            try:
-                response = requests.get(
-                    "https://query1.finance.yahoo.com/v7/finance/quote",
-                    params={"symbols": ticker},
-                    headers={"User-Agent": "Mozilla/5.0"},
-                    timeout=10,
-                )
-                response.raise_for_status()
-                result = response.json().get("quoteResponse", {}).get("result", [])
-                if result:
-                    candidate = result[0].get("regularMarketPrice")
-                    if candidate is not None:
-                        price = round(float(candidate), 2)
-                        attempts.append("yahoo.quote")
-                if price is None:
-                    attempts.append("yahoo.quote returned no price")
-            except Exception as exc:
-                attempts.append(f"yahoo.quote failed: {exc}")
-
-        if price is None and ALPHA_VANTAGE_API_KEY and label in ("gold", "oil"):
-            try:
-                if label == "gold":
-                    response = requests.get(
-                        "https://www.alphavantage.co/query",
-                        params={
-                            "function": "GOLD_SILVER_SPOT",
-                            "symbol": "GOLD",
-                            "apikey": ALPHA_VANTAGE_API_KEY,
-                        },
-                        timeout=10,
-                    )
-                    response.raise_for_status()
-                    payload = response.json()
-                    candidate = payload.get("price")
-                    if candidate is not None:
-                        price = round(float(candidate), 2)
-                        attempts.append("alpha_vantage.gold_spot")
-                    else:
-                        attempts.append("alpha_vantage.gold_spot returned no price")
-                elif label == "oil":
-                    response = requests.get(
-                        "https://www.alphavantage.co/query",
-                        params={
-                            "function": "BRENT",
-                            "interval": "daily",
-                            "apikey": ALPHA_VANTAGE_API_KEY,
-                        },
-                        timeout=10,
-                    )
-                    response.raise_for_status()
-                    payload = response.json()
-                    rows = payload.get("data", [])
-                    if rows:
-                        candidate = rows[0].get("value")
-                        if candidate is not None:
-                            price = round(float(candidate), 2)
-                            attempts.append("alpha_vantage.brent")
-                    if price is None:
-                        attempts.append("alpha_vantage.brent returned no price")
-            except Exception as exc:
-                attempts.append(f"alpha_vantage failed: {exc}")
-
-        if price is None and label == "nifty":
-            try:
-                response = requests.get(
-                    "https://www.nseindia.com/api/allIndices",
-                    headers={
-                        "User-Agent": "Mozilla/5.0",
-                        "Accept": "application/json",
-                        "Referer": "https://www.nseindia.com/",
-                    },
-                    timeout=10,
-                )
-                response.raise_for_status()
-                payload = response.json()
-                for item in payload.get("data", []):
-                    if item.get("index") == "NIFTY 50":
-                        candidate = item.get("last")
-                        if candidate is not None:
-                            price = round(float(candidate), 2)
-                            attempts.append("nse.allIndices")
-                        break
-                if price is None:
-                    attempts.append("nse.allIndices returned no NIFTY price")
-            except Exception as exc:
-                attempts.append(f"nse.allIndices failed: {exc}")
-
-        data[label] = price if price is not None else "Unavailable"
-        debug[label] = {
-            "ticker": ticker,
-            "status": "ok" if price is not None else "unavailable",
-            "attempts": attempts,
-        }
+    with ThreadPoolExecutor(max_workers=len(symbols)) as executor:
+        futures = [executor.submit(fetch_market_symbol, label, ticker) for label, ticker in symbols.items()]
+        for future in futures:
+            label, price, details = future.result()
+            data[label] = price
+            debug[label] = details
 
     return data, debug
 
@@ -1043,58 +1066,17 @@ def fetch_usdinr_rate():
     rate = None
 
     try:
-        history = yf.Ticker("USDINR=X").history(period="5d", interval="1d", auto_adjust=False)
-        if not history.empty and "Close" in history and not history["Close"].dropna().empty:
-            candidate = round(float(history["Close"].dropna().iloc[-1]), 2)
-            if candidate > 10:
-                rate = candidate
-                attempts.append(f"yfinance.history(USDINR=X) -> {rate}")
-            else:
-                attempts.append(f"yfinance.history(USDINR=X) returned suspicious value: {candidate}")
-        else:
-            attempts.append("yfinance.history(USDINR=X) returned empty")
-    except Exception as exc:
-        attempts.append(f"yfinance.history(USDINR=X) failed: {exc}")
-
-    if rate is None:
-        try:
-            ticker_obj = yf.Ticker("USDINR=X")
-            fast_info = getattr(ticker_obj, "fast_info", None)
-            if fast_info:
-                candidate = fast_info.get("lastPrice") or fast_info.get("regularMarketPrice")
-                if candidate is not None and float(candidate) > 10:
-                    rate = round(float(candidate), 2)
-                    attempts.append(f"yfinance.fast_info(USDINR=X) -> {rate}")
-                else:
-                    attempts.append(f"yfinance.fast_info(USDINR=X) returned bad value: {candidate}")
-        except Exception as exc:
-            attempts.append(f"yfinance.fast_info(USDINR=X) failed: {exc}")
-
-    if rate is None and ALPHA_VANTAGE_API_KEY:
-        try:
-            response = requests.get(
-                "https://www.alphavantage.co/query",
-                params={
-                    "function": "CURRENCY_EXCHANGE_RATE",
-                    "from_currency": "USD",
-                    "to_currency": "INR",
-                    "apikey": ALPHA_VANTAGE_API_KEY,
-                },
-                timeout=10,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            candidate = (
-                payload.get("Realtime Currency Exchange Rate", {})
-                .get("5. Exchange Rate")
-            )
+        ticker_obj = yf.Ticker("USDINR=X")
+        fast_info = getattr(ticker_obj, "fast_info", None)
+        if fast_info:
+            candidate = fast_info.get("lastPrice") or fast_info.get("regularMarketPrice")
             if candidate is not None and float(candidate) > 10:
                 rate = round(float(candidate), 2)
-                attempts.append(f"alpha_vantage.usdinr -> {rate}")
+                attempts.append(f"yfinance.fast_info(USDINR=X) -> {rate}")
             else:
-                attempts.append("alpha_vantage.usdinr returned no valid rate")
-        except Exception as exc:
-            attempts.append(f"alpha_vantage.usdinr failed: {exc}")
+                attempts.append(f"yfinance.fast_info(USDINR=X) returned bad value: {candidate}")
+    except Exception as exc:
+        attempts.append(f"yfinance.fast_info(USDINR=X) failed: {exc}")
 
     if rate is None:
         rate = 84.0
@@ -1121,6 +1103,8 @@ def home():
     prediction = None
     confidence = None
     selection = {"risk": "Medium", "sentiment": "Neutral"}
+    evaluation = get_evaluation()
+    home_metrics = build_home_metrics()
 
     if request.method == "POST":
         risk = request.form.get("risk", "Medium")
@@ -1135,6 +1119,8 @@ def home():
         prediction=prediction,
         confidence=confidence,
         selection=selection,
+        evaluation=evaluation,
+        home_metrics=home_metrics,
         risks=RISK_LEVELS,
         sentiments=SENTIMENT_LEVELS,
     )

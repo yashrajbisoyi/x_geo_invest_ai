@@ -12,7 +12,7 @@
         <p style="font-weight:700;font-size:14px;color:var(--rose)" id="alertTitle">Market Alert</p>
         <p style="font-size:12px;color:var(--muted)" id="alertDetail"></p>
     </div>
-    <button onclick="document.getElementById('marketAlertBanner').style.display='none'" style="margin-left:auto;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;padding:0;width:auto;box-shadow:none">✕</button>
+    <button onclick="document.getElementById('marketAlertBanner').style.display='none'" style="margin-left:auto;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;padding:0;width:auto;box-shadow:none">x</button>
 </div>
 
 <section class="hero hero-home">
@@ -32,7 +32,7 @@
     <div class="hero-aside">
         <div class="hero-metric">
             <span class="hero-label">Workflow</span>
-            <strong>Extract → Train → Predict</strong>
+            <strong>Extract -> Train -> Predict</strong>
         </div>
         <div class="hero-metric">
             <span class="hero-label">Coverage</span>
@@ -55,7 +55,7 @@
         <span>Live dataset rows</span>
         <strong id="cnt-rows">{{ home_metrics.dataset_rows }}</strong>
         <p class="meta" id="datasetRowsMeta" style="margin-top:8px">Includes {{ home_metrics.live_rows }} live API records</p>
-        <p class="meta" id="datasetRowsSource">Provider: {{ home_metrics.live_provider or "waiting" }} · Headlines: {{ home_metrics.live_record_count or 0 }}</p>
+        <p class="meta" id="datasetRowsSource">Provider: {{ home_metrics.live_provider or "waiting" }} | Headlines: {{ home_metrics.live_record_count or 0 }}</p>
         <p class="meta" id="datasetRowsSync">Last sync: {{ home_metrics.last_live_sync_label or "not fetched yet" }}</p>
         <button type="button" id="refreshDatasetBtn" class="secondary-button" style="margin-top:12px">Refresh dataset now</button>
     </article>
@@ -117,13 +117,13 @@
             <span class="gauge-label">Historical match confidence</span>
             <svg class="gauge-svg" viewBox="0 0 180 100" id="gaugesvg">
                 <path class="gauge-track" d="M20 90 A70 70 0 0 1 160 90"/>
-                <path class="gauge-arc"   d="M20 90 A70 70 0 0 1 160 90" id="gaugeArc"/>
+                <path class="gauge-arc" d="M20 90 A70 70 0 0 1 160 90" id="gaugeArc"/>
                 <text class="gauge-num" x="90" y="88" text-anchor="middle" id="gaugeNum">0%</text>
                 <text class="gauge-sub" x="90" y="100" text-anchor="middle">confidence</text>
             </svg>
         </div>
         {% else %}
-        <p class="meta" style="margin-top:12px">Historical confidence unavailable — dataset missing.</p>
+        <p class="meta" style="margin-top:12px">Historical confidence unavailable - dataset missing.</p>
         {% endif %}
     </article>
 
@@ -177,7 +177,7 @@
                     metaEl.textContent = "Includes " + (summary.live_articles || 0) + " live API records";
                 }
                 if(sourceEl){
-                    sourceEl.textContent = "Provider: " + (summary.live_provider || "unknown") + " · Headlines: " + (summary.live_record_count || 0);
+                    sourceEl.textContent = "Provider: " + (summary.live_provider || "unknown") + " | Headlines: " + (summary.live_record_count || 0);
                 }
                 if(syncEl){
                     syncEl.textContent = formatSyncLabel(summary.last_live_sync);
@@ -192,7 +192,7 @@
 
     setInterval(function(){
         updateDatasetSummary(false);
-    }, 120000);
+    }, 300000);
 })();
 </script>
 
@@ -239,7 +239,7 @@
             .then(function(summary){
                 document.getElementById("cnt-rows").textContent = summary.total_articles;
                 document.getElementById("datasetRowsMeta").textContent = "Includes " + (summary.live_articles || 0) + " live API records";
-                document.getElementById("datasetRowsSource").textContent = "Provider: " + (summary.live_provider || "unknown") + " · Headlines: " + (summary.live_record_count || 0);
+                document.getElementById("datasetRowsSource").textContent = "Provider: " + (summary.live_provider || "unknown") + " | Headlines: " + (summary.live_record_count || 0);
                 document.getElementById("datasetRowsSync").textContent = "Last sync: " + new Date((summary.last_live_sync || 0) * 1000).toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit", second:"2-digit" });
             })
             .catch(function(error){
@@ -285,9 +285,9 @@ function updateAgo(){
     var el = document.getElementById("updatedAgo");
     if(!el || !lastFetchedAt) return;
     var secs = Math.floor((Date.now() - lastFetchedAt) / 1000);
-    if(secs < 10) el.textContent = "· Updated just now";
-    else if(secs < 60) el.textContent = "· Updated " + secs + "s ago";
-    else el.textContent = "· Updated " + Math.floor(secs/60) + " min ago";
+    if(secs < 10) el.textContent = "| Updated just now";
+    else if(secs < 60) el.textContent = "| Updated " + secs + "s ago";
+    else el.textContent = "| Updated " + Math.floor(secs/60) + " min ago";
 }
 setInterval(updateAgo, 5000);
 
@@ -306,21 +306,21 @@ var prevNifty = null;
 
 function checkMarketAlerts(data){
     var banner = document.getElementById("marketAlertBanner");
-    var title  = document.getElementById("alertTitle");
+    var title = document.getElementById("alertTitle");
     var detail = document.getElementById("alertDetail");
     var alerts = [];
 
     if(prevNifty !== null && data.nifty !== "Unavailable"){
         var current = Number(data.nifty);
-        var change  = ((current - prevNifty) / prevNifty) * 100;
+        var change = ((current - prevNifty) / prevNifty) * 100;
         if(change <= -1){
-            alerts.push("NIFTY dropped " + Math.abs(change).toFixed(2) + "% — currently at " + current.toLocaleString("en-IN") + " pts");
+            alerts.push("NIFTY dropped " + Math.abs(change).toFixed(2) + "% - currently at " + current.toLocaleString("en-IN") + " pts");
         }
     }
     if(data.nifty !== "Unavailable") prevNifty = Number(data.nifty);
 
     if(alerts.length){
-        title.textContent  = "⚠ Market Alert";
+        title.textContent = "Market Alert";
         detail.textContent = alerts.join(" | ");
         banner.style.display = "flex";
         if(window.showToast) showToast("Market alert triggered!", "error");
@@ -332,25 +332,25 @@ function fetchMarketData() {
         .then(function(res){ return res.json(); })
         .then(function(data) {
             var elems = {
-                gold:   document.getElementById("goldPrice"),
-                oil:    document.getElementById("oilPrice"),
-                nifty:  document.getElementById("niftyPrice"),
+                gold: document.getElementById("goldPrice"),
+                oil: document.getElementById("oilPrice"),
+                nifty: document.getElementById("niftyPrice"),
                 sensex: document.getElementById("sensexPrice"),
-                fx:     document.getElementById("fxRate")
+                fx: document.getElementById("fxRate")
             };
             Object.values(elems).forEach(clearSkeleton);
 
-            elems.gold.innerText   = data.gold   === "Unavailable" ? "Gold: Unavailable"    : "Gold: ₹"   + formatIndianNumber(data.gold)   + " / oz";
-            elems.oil.innerText    = data.oil    === "Unavailable" ? "Oil: Unavailable"     : "Oil: ₹"    + formatIndianNumber(data.oil)    + " / barrel";
-            elems.nifty.innerText  = data.nifty  === "Unavailable" ? "NIFTY: Unavailable"   : "NIFTY: "   + formatIndianNumber(data.nifty)  + " pts";
-            elems.sensex.innerText = data.sensex === "Unavailable" ? "SENSEX: Unavailable"  : "SENSEX: "  + formatIndianNumber(data.sensex) + " pts";
-            elems.fx.innerText     = data.usdinr === "Unavailable" ? "USD/INR: Unavailable" : "USD/INR: " + formatIndianNumber(data.usdinr);
+            elems.gold.innerText = data.gold === "Unavailable" ? "Gold: Unavailable" : "Gold: Rs. " + formatIndianNumber(data.gold) + " / oz";
+            elems.oil.innerText = data.oil === "Unavailable" ? "Oil: Unavailable" : "Oil: Rs. " + formatIndianNumber(data.oil) + " / barrel";
+            elems.nifty.innerText = data.nifty === "Unavailable" ? "NIFTY: Unavailable" : "NIFTY: " + formatIndianNumber(data.nifty) + " pts";
+            elems.sensex.innerText = data.sensex === "Unavailable" ? "SENSEX: Unavailable" : "SENSEX: " + formatIndianNumber(data.sensex) + " pts";
+            elems.fx.innerText = data.usdinr === "Unavailable" ? "USD/INR: Unavailable" : "USD/INR: " + formatIndianNumber(data.usdinr);
 
-            elems.gold.className   = "market-item " + (data.gold   === "Unavailable" ? "market-down" : "market-up");
-            elems.oil.className    = "market-item " + (data.oil    === "Unavailable" ? "market-down" : "market-up");
-            elems.nifty.className  = "market-item " + (data.nifty  === "Unavailable" ? "market-down" : "market-up");
+            elems.gold.className = "market-item " + (data.gold === "Unavailable" ? "market-down" : "market-up");
+            elems.oil.className = "market-item " + (data.oil === "Unavailable" ? "market-down" : "market-up");
+            elems.nifty.className = "market-item " + (data.nifty === "Unavailable" ? "market-down" : "market-up");
             elems.sensex.className = "market-item " + (data.sensex === "Unavailable" ? "market-down" : "market-up");
-            elems.fx.className     = "market-item " + (data.usdinr === "Unavailable" ? "market-down" : "market-neutral");
+            elems.fx.className = "market-item " + (data.usdinr === "Unavailable" ? "market-down" : "market-neutral");
 
             var statusMap = { miss:"Updated just now", hit:"Using recent cached snapshot", "stale-success":"Using last successful snapshot", empty:"No market data available yet" };
             document.getElementById("marketStatus").innerText = "Market data: " + (statusMap[data.cache] || data.cache || "unknown");
@@ -364,7 +364,7 @@ function fetchMarketData() {
             var dbx = document.getElementById("marketDebug");
             var dbt = document.getElementById("marketDebugToggle");
             if(hasFailure){
-                dbx.innerText = JSON.stringify(data.debug||{}, null, 2);
+                dbx.innerText = JSON.stringify(data.debug || {}, null, 2);
                 dbt.classList.remove("hidden");
             } else {
                 dbx.classList.add("hidden");
@@ -384,7 +384,7 @@ function fetchMarketData() {
 }
 
 setTimeout(fetchMarketData, 1500);
-setInterval(fetchMarketData, 30000);
+setInterval(fetchMarketData, 120000);
 
 document.getElementById("marketDebugToggle").addEventListener("click", function(){
     var dbx = document.getElementById("marketDebug");
@@ -404,7 +404,9 @@ document.getElementById("marketDebugToggle").addEventListener("click", function(
         "News intelligence. Financial precision."
     ];
     var el = document.getElementById("typewriter-text");
-    var cur = 0, charIdx = 0, deleting = false;
+    var cur = 0;
+    var charIdx = 0;
+    var deleting = false;
 
     function type(){
         var phrase = phrases[cur];
@@ -431,25 +433,40 @@ document.getElementById("marketDebugToggle").addEventListener("click", function(
     function animateCount(card){
         var target = parseInt(card.getAttribute("data-count"), 10);
         var suffix = card.getAttribute("data-suffix") || "";
-        var el = card.querySelector("strong"); if(!el) return;
+        var el = card.querySelector("strong");
+        if(!el) return;
         var startTime = null;
-        function step(ts){ if(!startTime) startTime=ts; var p=Math.min((ts-startTime)/1400,1); var ease=1-Math.pow(1-p,3); el.textContent=Math.round(target*ease)+suffix; if(p<1) requestAnimationFrame(step); }
+        function step(ts){
+            if(!startTime) startTime = ts;
+            var p = Math.min((ts - startTime) / 1400, 1);
+            var ease = 1 - Math.pow(1 - p, 3);
+            el.textContent = Math.round(target * ease) + suffix;
+            if(p < 1) requestAnimationFrame(step);
+        }
         requestAnimationFrame(step);
     }
     var obs = new IntersectionObserver(function(entries){
-        entries.forEach(function(e){ if(e.isIntersecting && !e.target.classList.contains("counted")){ e.target.classList.add("counted"); animateCount(e.target); } });
+        entries.forEach(function(e){
+            if(e.isIntersecting && !e.target.classList.contains("counted")){
+                e.target.classList.add("counted");
+                animateCount(e.target);
+            }
+        });
     }, { threshold: 0.4 });
     cards.forEach(function(c){ obs.observe(c); });
 })();
 </script>
 
 <script>
-document.querySelector("form").addEventListener("submit", function(){
-    var btn = document.getElementById("submitBtn");
-    btn.textContent = "Analysing...";
-    btn.style.opacity = "0.75";
-    if(window.showToast) showToast("Generating recommendation...", "info");
-});
+var recommendationForm = document.querySelector("form");
+if (recommendationForm) {
+    recommendationForm.addEventListener("submit", function(){
+        var btn = document.getElementById("submitBtn");
+        btn.textContent = "Analysing...";
+        btn.style.opacity = "0.75";
+        if(window.showToast) showToast("Generating recommendation...", "info");
+    });
+}
 </script>
 
 <!-- PREDICTION HISTORY -->
@@ -485,7 +502,7 @@ function renderHistory(){
         return;
     }
     list.innerHTML = history.map(function(item){
-        var riskColor = item.risk==="High" ? "var(--rose)" : item.risk==="Medium" ? "var(--accent)" : "var(--success)";
+        var riskColor = item.risk === "High" ? "var(--rose)" : item.risk === "Medium" ? "var(--accent)" : "var(--success)";
         return '<div style="padding:14px 16px;border-radius:12px;background:rgba(255,255,255,0.25);border:1px solid rgba(255,255,255,0.4);margin-bottom:10px">'
             + '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">'
             + '<p style="font-size:13.5px;font-weight:700;color:var(--success);flex:1">' + item.recommendation + '</p>'
@@ -505,20 +522,27 @@ function clearHistory(){
     if(window.showToast) showToast("History cleared", "info");
 }
 
-{% if prediction %}
-(function(){
-    var history = loadHistory();
-    var entry = {
-        recommendation: {{ prediction | tojson }},
-        confidence: {{ confidence | tojson }},
-        risk: {{ selection.risk | tojson }},
-        sentiment: {{ selection.sentiment | tojson }},
-        time: new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}) + " · " + new Date().toLocaleDateString("en-IN",{day:"numeric",month:"short"})
-    };
-    history.unshift(entry);
-    saveHistory(history);
-})();
-{% endif %}
+var latestPredictionEntry = {
+    recommendation: {{ prediction | tojson }},
+    confidence: {{ confidence | tojson }},
+    risk: {{ selection.risk | tojson }},
+    sentiment: {{ selection.sentiment | tojson }}
+};
+
+if (latestPredictionEntry.recommendation) {
+    (function(){
+        var history = loadHistory();
+        var entry = {
+            recommendation: latestPredictionEntry.recommendation,
+            confidence: latestPredictionEntry.confidence,
+            risk: latestPredictionEntry.risk,
+            sentiment: latestPredictionEntry.sentiment,
+            time: new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}) + " | " + new Date().toLocaleDateString("en-IN",{day:"numeric",month:"short"})
+        };
+        history.unshift(entry);
+        saveHistory(history);
+    })();
+}
 
 renderHistory();
 </script>
