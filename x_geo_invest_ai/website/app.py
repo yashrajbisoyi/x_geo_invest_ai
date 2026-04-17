@@ -557,6 +557,31 @@ def live_records_to_dataframe(records):
     return frame
 
 
+def build_historical_news_fallback(limit=10):
+    fallback_records = []
+    for record in build_news_records(limit=limit):
+        risk = record.get("risk", "Unknown")
+        sentiment = record.get("sentiment", "Unknown")
+        recommendation = recommendation_for_inputs(risk, sentiment)
+        confidence = confidence_for_inputs(risk, sentiment, recommendation)
+        fallback_records.append(
+            {
+                "title": record.get("title", "Untitled"),
+                "source": record.get("source", "Historical dataset"),
+                "published": record.get("published", ""),
+                "content": record.get("content", ""),
+                "author": "Historical dataset",
+                "url": None,
+                "sentiment": sentiment,
+                "risk": risk,
+                "recommendation": recommendation,
+                "confidence": confidence,
+                "dataset_type": "historical-fallback",
+            }
+        )
+    return fallback_records
+
+
 def get_live_news_records(force_refresh=False):
     cache_is_fresh = (
         not force_refresh
@@ -579,11 +604,25 @@ def get_live_news_records(force_refresh=False):
         persist_runtime_dataset(records)
         return records, debug, "miss"
     except Exception as exc:
-        debug = {"status": "error", "message": str(exc)}
+        debug = {"status": "error", "message": str(exc), "provider": "live-fallback"}
         fallback = x_news_cache["data"] if x_news_cache["data"] is not None else []
         if fallback:
             persist_runtime_dataset(fallback)
-        return fallback, debug, "stale" if fallback else "empty"
+            return fallback, debug, "stale"
+
+        historical = build_historical_news_fallback(limit=10)
+        if historical:
+            x_news_cache["data"] = historical
+            x_news_cache["debug"] = {
+                **debug,
+                "provider": "historical-dataset",
+                "records": len(historical),
+            }
+            x_news_cache["timestamp"] = time.time()
+            persist_runtime_dataset(historical)
+            return historical, x_news_cache["debug"], "fallback"
+
+        return fallback, debug, "empty"
 
 
 def runtime_dataset_frame(include_live=True):
