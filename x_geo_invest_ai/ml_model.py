@@ -142,6 +142,11 @@ def evaluate_model(name, estimator, x_train, x_test, y_train, y_test):
 def save_confusion_matrix(y_test, predictions, labels, model_name):
     """Save confusion matrix as PNG for display on the performance page."""
     cm = confusion_matrix(y_test, predictions, labels=labels)
+    ui_bg = "#17132f"
+    panel_bg = "#221b45"
+    text_color = "#ffffff"
+    grid_color = (1, 1, 1, 0.08)
+    cmap = sns.blend_palette([panel_bg, "#6d5efc", "#cfc8ff"], as_cmap=True)
 
     # Shorten long labels for readability
     short_labels = []
@@ -152,27 +157,35 @@ def save_confusion_matrix(y_test, predictions, labels, model_name):
         else:
             short_labels.append(label)
 
-    fig, ax = plt.subplots(figsize=(10, 8))
-    sns.heatmap(
+    fig, ax = plt.subplots(figsize=(10, 8), facecolor=ui_bg)
+    ax.set_facecolor(panel_bg)
+    heatmap = sns.heatmap(
         cm,
         annot=True,
         fmt="d",
-        cmap="Purples",
+        cmap=cmap,
         xticklabels=short_labels,
         yticklabels=short_labels,
         ax=ax,
         linewidths=0.5,
-        linecolor="white",
+        linecolor=grid_color,
+        annot_kws={"color": text_color, "fontsize": 11},
+        cbar_kws={"shrink": 0.9},
     )
     ax.set_title(f"Confusion Matrix — {model_name.replace('_', ' ').title()}", fontsize=13, pad=14)
-    ax.set_xlabel("Predicted label", fontsize=10)
-    ax.set_ylabel("True label", fontsize=10)
-    plt.xticks(rotation=30, ha="right", fontsize=8)
-    plt.yticks(rotation=0, fontsize=8)
+    ax.title.set_color(text_color)
+    ax.set_xlabel("Predicted label", fontsize=10, color=text_color)
+    ax.set_ylabel("True label", fontsize=10, color=text_color)
+    ax.tick_params(axis="x", colors=text_color, labelsize=8, rotation=30)
+    ax.tick_params(axis="y", colors=text_color, labelsize=8, rotation=0)
+    colorbar = heatmap.collections[0].colorbar
+    colorbar.ax.yaxis.set_tick_params(color=text_color)
+    plt.setp(colorbar.ax.get_yticklabels(), color=text_color)
+    colorbar.outline.set_edgecolor(grid_color)
     plt.tight_layout()
 
     output_path = ARTIFACTS_DIR / "confusion_matrix.png"
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
     plt.close()
     print(f"  Confusion matrix saved -> {output_path}")
     return output_path

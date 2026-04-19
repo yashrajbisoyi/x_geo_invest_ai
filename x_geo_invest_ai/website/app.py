@@ -1,27 +1,35 @@
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import time
+import uuid
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, jsonify, render_template, request, send_from_directory, session
 import pandas as pd
 import requests
 from textblob import TextBlob
 
-load_dotenv()
-
 app = Flask(__name__)
+app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-me")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 RAW_DIR = BASE_DIR / "data" / "raw"
 PROCESSED_DIR = BASE_DIR / "data" / "processed"
 ARTIFACTS_DIR = BASE_DIR / "artifacts"
+# Load .env from both repo root and module root so local runs work from any cwd.
+load_dotenv(dotenv_path=BASE_DIR / ".env")
+load_dotenv(dotenv_path=BASE_DIR.parent / ".env")
+IMPROVEMENTS_DB_PATH = Path(
+    os.getenv("IMPROVEMENTS_DB_PATH", str(BASE_DIR / "data" / "improvements.db"))
+)
 
 RUNTIME_DATASET_PATH = PROCESSED_DIR / "runtime_combined_news.csv"
 LIVE_DATASET_PATH = PROCESSED_DIR / "live_runtime_news.csv"
@@ -45,6 +53,8 @@ SENTIMENT_LEVELS = ["Negative", "Neutral", "Positive"]
 X_BEARER_TOKEN = os.getenv("X_BEARER_TOKEN")
 ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
 NEWSDATA_API_KEY = os.getenv("NEWSDATA_API_KEY") or os.getenv("NEWS_API_KEY")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_TIMEOUT_SECONDS = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "35"))
 
 market_cache = {"data": None, "timestamp": 0, "debug": {}}
 x_news_cache = {"data": None, "timestamp": 0, "debug": {}}
@@ -97,6 +107,382 @@ for canonical_name, aliases in COUNTRY_MONITOR_ALIASES.items():
         normalized_alias = " ".join(str(alias).strip().lower().replace("-", " ").split())
         if normalized_alias:
             COUNTRY_ALIAS_LOOKUP[normalized_alias] = normalized_canonical
+
+
+def init_improvements_db():
+    IMPROVEMENTS_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(IMPROVEMENTS_DB_PATH) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS improvements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS problem_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                problem TEXT NOT NULL,
+                problem_type TEXT NOT NULL,
+                urgency TEXT NOT NULL,
+                plan_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS geochat_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+
+
+def list_improvements(limit=100):
+    init_improvements_db()
+    with sqlite3.connect(IMPROVEMENTS_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT id, content, created_at
+            FROM improvements
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def add_improvement(content):
+    text = str(content or "").strip()
+    if not text:
+        raise ValueError("Improvement text is required.")
+    if len(text) > 600:
+        raise ValueError("Improvement text must be 600 characters or fewer.")
+
+    init_improvements_db()
+    created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    with sqlite3.connect(IMPROVEMENTS_DB_PATH) as conn:
+        cursor = conn.execute(
+            "INSERT INTO improvements (content, created_at) VALUES (?, ?)",
+            (text, created_at),
+        )
+        conn.commit()
+        improvement_id = int(cursor.lastrowid)
+    return {"id": improvement_id, "content": text, "created_at": created_at}
+
+
+init_improvements_db()
+
+
+def get_or_create_client_session_id():
+    existing = session.get("client_session_id")
+    if existing:
+        return str(existing)
+    session_id = uuid.uuid4().hex
+    session["client_session_id"] = session_id
+    return session_id
+
+
+def list_problem_history(session_id, limit=12):
+    init_improvements_db()
+    with sqlite3.connect(IMPROVEMENTS_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT id, problem, problem_type, urgency, plan_json, created_at
+            FROM problem_history
+            WHERE session_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (str(session_id), int(limit)),
+        ).fetchall()
+    records = []
+    for row in rows:
+        plan_data = {}
+        try:
+            plan_data = json.loads(row["plan_json"])
+        except (TypeError, json.JSONDecodeError):
+            plan_data = {}
+        records.append(
+            {
+                "id": int(row["id"]),
+                "problem": row["problem"],
+                "type": row["problem_type"],
+                "urgency": row["urgency"],
+                "plan": plan_data,
+                "created_at": row["created_at"],
+            }
+        )
+    return records
+
+
+def add_problem_history(session_id, problem, problem_type, urgency, plan):
+    init_improvements_db()
+    created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    with sqlite3.connect(IMPROVEMENTS_DB_PATH) as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO problem_history (session_id, problem, problem_type, urgency, plan_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(session_id),
+                str(problem).strip(),
+                str(problem_type).strip().lower(),
+                str(urgency).strip().lower(),
+                json.dumps(plan, ensure_ascii=True),
+                created_at,
+            ),
+        )
+        conn.commit()
+        history_id = int(cursor.lastrowid)
+    return history_id, created_at
+
+
+def clear_problem_history(session_id):
+    init_improvements_db()
+    with sqlite3.connect(IMPROVEMENTS_DB_PATH) as conn:
+        cursor = conn.execute(
+            "DELETE FROM problem_history WHERE session_id = ?",
+            (str(session_id),),
+        )
+        conn.commit()
+        return int(cursor.rowcount)
+
+
+def list_geochat_history(session_id, limit=24):
+    init_improvements_db()
+    with sqlite3.connect(IMPROVEMENTS_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT id, role, content, created_at
+            FROM geochat_history
+            WHERE session_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (str(session_id), int(limit)),
+        ).fetchall()
+
+    ordered = list(reversed(rows))
+    return [
+        {
+            "id": int(row["id"]),
+            "role": row["role"],
+            "content": row["content"],
+            "created_at": row["created_at"],
+        }
+        for row in ordered
+    ]
+
+
+def add_geochat_message(session_id, role, content):
+    text = str(content or "").strip()
+    if not text:
+        return None
+    created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    with sqlite3.connect(IMPROVEMENTS_DB_PATH) as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO geochat_history (session_id, role, content, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (str(session_id), str(role), text, created_at),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+
+
+def clear_geochat_history(session_id):
+    with sqlite3.connect(IMPROVEMENTS_DB_PATH) as conn:
+        cursor = conn.execute(
+            "DELETE FROM geochat_history WHERE session_id = ?",
+            (str(session_id),),
+        )
+        conn.commit()
+        return int(cursor.rowcount)
+
+
+def extract_openai_text(payload):
+    direct_text = payload.get("output_text")
+    if isinstance(direct_text, str) and direct_text.strip():
+        return direct_text.strip()
+
+    parts = []
+    for item in payload.get("output", []):
+        for content in item.get("content", []):
+            if content.get("type") in {"output_text", "text"}:
+                text = content.get("text")
+                if text:
+                    parts.append(str(text))
+    return "\n".join(parts).strip()
+
+
+def get_openai_api_key():
+    candidates = [
+        os.getenv("OPENAI_API_KEY"),
+        os.getenv("OPENAI_KEY"),
+        os.getenv("OPENAI_API_TOKEN"),
+    ]
+    for raw in candidates:
+        if not raw:
+            continue
+        key = str(raw).strip().strip('"').strip("'").strip()
+        if key:
+            return key
+    return None
+
+
+def fallback_problem_solution(problem, problem_type, urgency):
+    urgency_line = {
+        "today": "Create a same-day fix checklist and validate with 3 real users before close of day.",
+        "week": "Plan one focused weekly sprint with clear owner and daily progress updates.",
+        "plan": "Build a phased roadmap with milestones and measurable review gates.",
+    }.get(urgency, "Set a short implementation cycle with measurable checkpoints.")
+
+    return {
+        "headline": "Structured AI action plan",
+        "root_cause": f"The issue appears to center around '{problem_type}' constraints and unclear execution sequencing.",
+        "immediate_actions": "Define scope in one sentence, isolate top blocker, and ship one smallest working fix first.",
+        "next_milestone": urgency_line,
+        "success_metric": "Track one quality metric and one adoption metric for 7 days to validate improvement.",
+    }
+
+
+def generate_geochat_answer(question, history=None):
+    text = str(question or "").strip()
+    if len(text) < 6:
+        raise ValueError("Please ask a meaningful question.")
+    openai_api_key = get_openai_api_key()
+    if not openai_api_key:
+        raise RuntimeError("OpenAI key is missing. Set OPENAI_API_KEY (or OPENAI_KEY) in environment variables.")
+
+    previous_messages = []
+    for item in (history or [])[-12:]:
+        role = "assistant" if item.get("role") == "assistant" else "user"
+        content = str(item.get("content") or "").strip()
+        if content:
+            previous_messages.append(
+                {"role": role, "content": [{"type": "input_text", "text": content}]}
+            )
+
+    system_prompt = (
+        "You are Bisoyi, an assistant that is strongest in geopolitics, macroeconomics, "
+        "financial markets, risk, and investment education, but you can answer general "
+        "knowledge questions too. Provide clear, practical, concise answers. Avoid abusive "
+        "content and avoid guaranteeing financial outcomes; use educational framing."
+    )
+
+    messages = [{"role": "system", "content": [{"type": "input_text", "text": system_prompt}]}]
+    messages.extend(previous_messages)
+    messages.append({"role": "user", "content": [{"type": "input_text", "text": text}]})
+
+    response = requests.post(
+        "https://api.openai.com/v1/responses",
+        headers={
+            "Authorization": f"Bearer {openai_api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": OPENAI_MODEL,
+            "temperature": 0.5,
+            "input": messages,
+        },
+        timeout=OPENAI_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    answer = extract_openai_text(payload)
+    if not answer:
+        return (
+            "I could not generate an answer right now. Please retry with a specific GeoFinance "
+            "question such as market impact, risk scenario, or macro trend."
+        )
+    return answer
+
+
+def generate_problem_solution(problem, problem_type, urgency, history=None):
+    openai_api_key = get_openai_api_key()
+    if not openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY is missing. Add it in environment variables to enable AI answers.")
+
+    system_prompt = (
+        "You are a practical GeoFinance and product problem-solving assistant. "
+        "Return valid JSON only with keys: headline, root_cause, immediate_actions, "
+        "next_milestone, success_metric. Keep each field concise and actionable."
+    )
+    history_lines = []
+    for item in (history or [])[:4]:
+        history_lines.append(
+            f"- Past problem: {item.get('problem', '')} | type={item.get('type', '')} | urgency={item.get('urgency', '')}"
+        )
+    history_block = "\n".join(history_lines) if history_lines else "No prior session context."
+
+    user_prompt = (
+        f"Problem: {problem}\n"
+        f"Type: {problem_type}\n"
+        f"Urgency: {urgency}\n"
+        f"Previous session context:\n{history_block}\n"
+        "Provide realistic, implementation-focused guidance."
+    )
+
+    response = requests.post(
+        "https://api.openai.com/v1/responses",
+        headers={
+            "Authorization": f"Bearer {openai_api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": OPENAI_MODEL,
+            "temperature": 0.4,
+            "input": [
+                {"role": "system", "content": [{"type": "input_text", "text": system_prompt}]},
+                {"role": "user", "content": [{"type": "input_text", "text": user_prompt}]},
+            ],
+        },
+        timeout=OPENAI_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    text = extract_openai_text(payload)
+    if not text:
+        return fallback_problem_solution(problem, problem_type, urgency)
+
+    parsed = None
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{[\s\S]*\}", text)
+        if match:
+            try:
+                parsed = json.loads(match.group(0))
+            except json.JSONDecodeError:
+                parsed = None
+
+    if not isinstance(parsed, dict):
+        return fallback_problem_solution(problem, problem_type, urgency)
+
+    return {
+        "headline": str(parsed.get("headline") or "AI-generated solution plan").strip(),
+        "root_cause": str(parsed.get("root_cause") or parsed.get("root") or "").strip(),
+        "immediate_actions": str(parsed.get("immediate_actions") or parsed.get("now") or "").strip(),
+        "next_milestone": str(parsed.get("next_milestone") or parsed.get("next") or "").strip(),
+        "success_metric": str(parsed.get("success_metric") or parsed.get("metric") or "").strip(),
+    }
 
 
 def first_existing_path(candidates):
@@ -935,7 +1321,11 @@ def build_performance_metrics():
                 "improvement_notes": evaluation.get("improvement_notes", []),
                 "evaluation_dataset_path": evaluation.get("dataset_path"),
                 "trained_at": evaluation.get("trained_at"),
-                "confusion_matrix_url": "/artifacts/confusion_matrix.png" if confusion_matrix_path.exists() else None,
+                "confusion_matrix_url": (
+                    f"/artifacts/confusion_matrix.png?v={int(confusion_matrix_path.stat().st_mtime)}"
+                    if confusion_matrix_path.exists()
+                    else None
+                ),
             }
         )
 
@@ -1313,6 +1703,123 @@ def api_dataset_summary():
     summary["live_provider"] = x_news_cache["debug"].get("provider") if x_news_cache["data"] else None
     summary["live_record_count"] = x_news_cache["debug"].get("records", 0) if x_news_cache["data"] else 0
     return jsonify(summary)
+
+
+@app.route("/api/improvements", methods=["GET", "POST"])
+def api_improvements():
+    if request.method == "GET":
+        return jsonify({"status": "ok", "improvements": list_improvements()})
+
+    payload = request.get_json(silent=True) or request.form or {}
+    content = payload.get("text") or payload.get("content")
+
+    try:
+        created = add_improvement(content)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"status": "error", "message": f"Failed to save improvement: {exc}"}), 500
+
+    return jsonify({"status": "ok", "improvement": created}), 201
+
+
+@app.route("/api/problem-solver", methods=["POST"])
+def api_problem_solver():
+    payload = request.get_json(silent=True) or {}
+    problem = str(payload.get("problem", "")).strip()
+    problem_type = str(payload.get("type", "technical")).strip().lower()
+    urgency = str(payload.get("urgency", "week")).strip().lower()
+
+    if not problem:
+        return jsonify({"status": "error", "message": "problem is required"}), 400
+    if len(problem) > 700:
+        return jsonify({"status": "error", "message": "problem must be 700 characters or fewer"}), 400
+
+    valid_types = {"technical", "product", "design", "growth"}
+    valid_urgency = {"today", "week", "plan"}
+    if problem_type not in valid_types:
+        problem_type = "technical"
+    if urgency not in valid_urgency:
+        urgency = "week"
+
+    session_id = get_or_create_client_session_id()
+    prior_history = list_problem_history(session_id, limit=6)
+
+    try:
+        plan = generate_problem_solution(problem, problem_type, urgency, history=prior_history)
+    except requests.RequestException as exc:
+        return jsonify(
+            {
+                "status": "error",
+                "message": f"AI service request failed: {exc}",
+                "fallback_plan": fallback_problem_solution(problem, problem_type, urgency),
+            }
+        ), 502
+    except Exception as exc:
+        return jsonify(
+            {
+                "status": "error",
+                "message": str(exc),
+                "fallback_plan": fallback_problem_solution(problem, problem_type, urgency),
+            }
+        ), 500
+
+    history_id, created_at = add_problem_history(session_id, problem, problem_type, urgency, plan)
+    history_entry = {
+        "id": history_id,
+        "problem": problem,
+        "type": problem_type,
+        "urgency": urgency,
+        "plan": plan,
+        "created_at": created_at,
+    }
+    return jsonify({"status": "ok", "plan": plan, "history_entry": history_entry})
+
+
+@app.route("/api/problem-solver/history", methods=["GET", "DELETE"])
+def api_problem_solver_history():
+    session_id = get_or_create_client_session_id()
+    if request.method == "GET":
+        return jsonify({"status": "ok", "history": list_problem_history(session_id, limit=20)})
+
+    deleted = clear_problem_history(session_id)
+    return jsonify({"status": "ok", "deleted": deleted})
+
+
+@app.route("/api/geochat/history", methods=["GET", "DELETE"])
+def api_geochat_history():
+    session_id = get_or_create_client_session_id()
+    if request.method == "GET":
+        return jsonify({"status": "ok", "messages": list_geochat_history(session_id, limit=40)})
+
+    deleted = clear_geochat_history(session_id)
+    return jsonify({"status": "ok", "deleted": deleted})
+
+
+@app.route("/api/geochat", methods=["POST"])
+def api_geochat():
+    payload = request.get_json(silent=True) or {}
+    question = str(payload.get("question", "")).strip()
+    if not question:
+        return jsonify({"status": "error", "message": "question is required"}), 400
+    if len(question) > 1400:
+        return jsonify({"status": "error", "message": "question must be 1400 characters or fewer"}), 400
+
+    session_id = get_or_create_client_session_id()
+    prior = list_geochat_history(session_id, limit=20)
+
+    try:
+        answer = generate_geochat_answer(question, history=prior)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    except requests.RequestException as exc:
+        return jsonify({"status": "error", "message": f"AI service request failed: {exc}"}), 502
+    except Exception as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+    add_geochat_message(session_id, "user", question)
+    add_geochat_message(session_id, "assistant", answer)
+    return jsonify({"status": "ok", "answer": answer})
 
 
 @app.route("/api/refresh-runtime-model", methods=["POST"])

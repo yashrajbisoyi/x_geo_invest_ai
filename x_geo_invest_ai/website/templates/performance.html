@@ -120,23 +120,44 @@
         {% endif %}
     </article>
 
-    <article class="result result-wide">
-        <h2>Suggested improvements</h2>
-        {% if metrics.improvement_notes %}
-        <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
-            {% for note in metrics.improvement_notes %}
-            <div style="display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-radius:12px;background:rgba(109,94,252,0.07);border:1px solid rgba(109,94,252,0.15)">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0;margin-top:2px">
-                    <circle cx="8" cy="8" r="6.5" stroke="#6d5efc" stroke-width="1.4"/>
-                    <path d="M8 5v4M8 11v.5" stroke="#6d5efc" stroke-width="1.4" stroke-linecap="round"/>
-                </svg>
-                <p style="color:var(--text);font-size:14px">{{ note }}</p>
+    <article class="result result-wide health-studio"
+             id="healthStudio"
+             data-accuracy="{{ ((metrics.accuracy or 0) * 100) | round(1) }}"
+             data-f1="{{ ((metrics.f1_weighted or 0) * 100) | round(1) }}"
+             data-consistency="{{ metrics.combo_consistency or 0 }}"
+             data-total="{{ metrics.total_articles or 0 }}"
+             data-train-time="{{ metrics.training_time_seconds if metrics.training_time_seconds is not none else -1 }}"
+             data-predict-time="{{ metrics.prediction_time_seconds if metrics.prediction_time_seconds is not none else -1 }}">
+        <h2>Performance Health Radar</h2>
+        <p class="meta" style="margin-top:6px">Readiness scores and top bottlenecks detected from current pipeline outputs.</p>
+
+        <div class="health-grid" style="margin-top:14px">
+            <div class="health-card">
+                <p class="meta">Data Quality</p>
+                <p class="health-score" id="scoreData">0</p>
+                <div class="health-track"><span id="barData"></span></div>
             </div>
-            {% endfor %}
+            <div class="health-card">
+                <p class="meta">Model Quality</p>
+                <p class="health-score" id="scoreModel">0</p>
+                <div class="health-track"><span id="barModel"></span></div>
+            </div>
+            <div class="health-card">
+                <p class="meta">Latency</p>
+                <p class="health-score" id="scoreLatency">0</p>
+                <div class="health-track"><span id="barLatency"></span></div>
+            </div>
+            <div class="health-card">
+                <p class="meta">Stability</p>
+                <p class="health-score" id="scoreStability">0</p>
+                <div class="health-track"><span id="barStability"></span></div>
+            </div>
         </div>
-        {% else %}
-        <p>Improvement notes will appear after training runs.</p>
-        {% endif %}
+
+        <div style="margin-top:16px">
+            <p class="meta" style="margin-bottom:8px">Top bottlenecks</p>
+            <div id="bottleneckList" class="bottleneck-list"></div>
+        </div>
     </article>
 </section>
 
@@ -186,10 +207,174 @@
         });
     }, { threshold: 0.3 });
     bars.forEach(function(b){ barObs.observe(b); });
+
+    var healthStudio = document.getElementById("healthStudio");
+    if (healthStudio) {
+        function toNum(v) {
+            var n = Number(v);
+            return isFinite(n) ? n : 0;
+        }
+        function clamp(v) {
+            return Math.max(0, Math.min(100, Math.round(v)));
+        }
+        function healthColor(score) {
+            if (score >= 75) return "var(--success)";
+            if (score >= 45) return "var(--accent)";
+            return "var(--rose)";
+        }
+        function paintScore(numId, barId, score) {
+            var scoreEl = document.getElementById(numId);
+            var barEl = document.getElementById(barId);
+            if (scoreEl) {
+                scoreEl.textContent = score + "/100";
+                scoreEl.style.color = healthColor(score);
+            }
+            if (barEl) {
+                barEl.style.width = score + "%";
+                barEl.style.background = "linear-gradient(90deg, " + healthColor(score) + ", var(--accent-2))";
+            }
+        }
+
+        var accuracy = toNum(healthStudio.dataset.accuracy);
+        var f1 = toNum(healthStudio.dataset.f1);
+        var consistency = toNum(healthStudio.dataset.consistency);
+        var totalRows = toNum(healthStudio.dataset.total);
+        var trainTime = toNum(healthStudio.dataset.trainTime);
+        var predictTime = toNum(healthStudio.dataset.predictTime);
+
+        var dataScore = clamp((consistency * 0.55) + (Math.min(totalRows, 1000) / 1000 * 45));
+        var modelScore = clamp((accuracy * 0.55) + (f1 * 0.45));
+        var latencySource = 100 - ((Math.max(trainTime, 0) * 2.2) + (Math.max(predictTime, 0) * 10));
+        var latencyScore = clamp(trainTime < 0 || predictTime < 0 ? 40 : latencySource);
+        var stabilityScore = clamp((consistency * 0.5) + (modelScore * 0.5));
+
+        paintScore("scoreData", "barData", dataScore);
+        paintScore("scoreModel", "barModel", modelScore);
+        paintScore("scoreLatency", "barLatency", latencyScore);
+        paintScore("scoreStability", "barStability", stabilityScore);
+
+        var bottlenecks = [];
+        if (accuracy < 75) {
+            bottlenecks.push({ sev: "P1", title: "Model accuracy below production comfort", fix: "Retrain with richer features and rebalance class distribution." });
+        }
+        if (f1 < 72) {
+            bottlenecks.push({ sev: "P1", title: "Weak F1 indicates class prediction imbalance", fix: "Tune thresholds and compare weighted loss across classes." });
+        }
+        if (trainTime > 35 || predictTime > 1.5) {
+            bottlenecks.push({ sev: "P2", title: "Latency risk during refresh/prediction cycle", fix: "Cache intermediate artifacts and reduce non-critical runtime steps." });
+        }
+        if (consistency < 78) {
+            bottlenecks.push({ sev: "P2", title: "Input consistency may reduce recommendation reliability", fix: "Tighten preprocessing rules and add schema validation checks." });
+        }
+        if (totalRows < 200) {
+            bottlenecks.push({ sev: "P3", title: "Dataset size may be too small for stable generalization", fix: "Increase verified source coverage and include longer time windows." });
+        }
+        if (!bottlenecks.length) {
+            bottlenecks.push({ sev: "OK", title: "No critical bottlenecks detected", fix: "Maintain current pipeline and monitor daily drift." });
+        }
+
+        var listEl = document.getElementById("bottleneckList");
+        if (listEl) {
+            listEl.innerHTML = "";
+            bottlenecks.slice(0, 3).forEach(function(item){
+                var row = document.createElement("div");
+                row.className = "bottleneck-item";
+                row.innerHTML =
+                    '<span class="bottleneck-sev">' + item.sev + '</span>' +
+                    '<div class="bottleneck-copy">' +
+                        '<p class="bottleneck-title">' + item.title + '</p>' +
+                        '<p class="meta">' + item.fix + '</p>' +
+                    '</div>';
+                listEl.appendChild(row);
+            });
+        }
+    }
 })();
 </script>
 
 <style>
+.health-studio {
+    position: relative;
+    overflow: hidden;
+}
+.health-studio::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: 20px;
+    background: linear-gradient(135deg, rgba(255,142,60,0.45), rgba(109,94,252,0.40), rgba(30,212,160,0.35));
+    z-index: -1;
+    filter: blur(18px);
+    animation: studioGlow 6s ease-in-out infinite;
+}
+@keyframes studioGlow {
+    0%, 100% { opacity: 0.45; }
+    50% { opacity: 0.8; }
+}
+.health-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+.health-card {
+    padding: 12px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+}
+.health-score {
+    font-size: 1.2rem;
+    font-weight: 700;
+    margin-top: 4px;
+}
+.health-track {
+    margin-top: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    overflow: hidden;
+}
+.health-track span {
+    display: block;
+    width: 0%;
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.8s ease;
+}
+.bottleneck-list {
+    display: grid;
+    gap: 10px;
+}
+.bottleneck-item {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.10);
+}
+.bottleneck-sev {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--accent-2);
+    background: rgba(109,94,252,0.16);
+    border: 1px solid rgba(109,94,252,0.35);
+    border-radius: 8px;
+    padding: 5px 7px;
+}
+.bottleneck-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+@media (max-width: 760px) {
+    .health-grid {
+        grid-template-columns: 1fr !important;
+    }
+}
 @media print {
     .ticker-bar,
     .navbar,

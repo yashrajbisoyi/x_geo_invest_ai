@@ -1,61 +1,61 @@
 {
   "dataset_path": "C:\\Users\\KIIT\\Downloads\\x_geo_invest_ai\\x_geo_invest_ai\\x_geo_invest_ai\\data\\processed\\runtime_combined_news.csv",
-  "dataset_rows": 615,
-  "train_rows": 461,
-  "test_rows": 154,
-  "trained_at": "2026-04-15T12:04:20Z",
+  "dataset_rows": 863,
+  "train_rows": 647,
+  "test_rows": 216,
+  "trained_at": "2026-04-19T15:31:10Z",
   "best_model": "svm_linear",
-  "accuracy": 0.9935,
-  "f1_weighted": 0.9904,
-  "cv_f1_mean": 0.9976,
-  "cv_f1_std": 0.0048,
-  "training_time_seconds": 0.1871,
-  "prediction_time_seconds": 0.014702,
+  "accuracy": 0.9954,
+  "f1_weighted": 0.9931,
+  "cv_f1_mean": 0.9983,
+  "cv_f1_std": 0.0034,
+  "training_time_seconds": 0.1304,
+  "prediction_time_seconds": 0.0121,
   "model_comparison": [
     {
       "name": "logistic_regression",
-      "accuracy": 0.987,
-      "f1_weighted": 0.9829,
-      "cv_f1_mean": 0.9909,
-      "cv_f1_std": 0.0089,
-      "training_time_seconds": 0.1593,
-      "prediction_time_seconds": 0.012117
+      "accuracy": 0.9954,
+      "f1_weighted": 0.9931,
+      "cv_f1_mean": 0.9948,
+      "cv_f1_std": 0.0069,
+      "training_time_seconds": 0.0899,
+      "prediction_time_seconds": 0.008443
     },
     {
       "name": "complement_naive_bayes",
-      "accuracy": 0.9675,
-      "f1_weighted": 0.9517,
-      "cv_f1_mean": 0.9517,
-      "cv_f1_std": 0.0069,
-      "training_time_seconds": 0.0377,
-      "prediction_time_seconds": 0.012357
+      "accuracy": 0.963,
+      "f1_weighted": 0.957,
+      "cv_f1_mean": 0.9571,
+      "cv_f1_std": 0.0134,
+      "training_time_seconds": 0.0398,
+      "prediction_time_seconds": 0.010003
     },
     {
       "name": "random_forest",
-      "accuracy": 0.9675,
-      "f1_weighted": 0.9551,
-      "cv_f1_mean": 0.978,
-      "cv_f1_std": 0.012,
-      "training_time_seconds": 0.522,
-      "prediction_time_seconds": 0.034113
+      "accuracy": 0.9954,
+      "f1_weighted": 0.9931,
+      "cv_f1_mean": 0.9854,
+      "cv_f1_std": 0.005,
+      "training_time_seconds": 0.2302,
+      "prediction_time_seconds": 0.015059
     },
     {
       "name": "decision_tree",
-      "accuracy": 0.9935,
-      "f1_weighted": 0.9909,
-      "cv_f1_mean": 0.9949,
-      "cv_f1_std": 0.0102,
-      "training_time_seconds": 0.0468,
-      "prediction_time_seconds": 0.012124
+      "accuracy": 0.9954,
+      "f1_weighted": 0.9931,
+      "cv_f1_mean": 0.9971,
+      "cv_f1_std": 0.0037,
+      "training_time_seconds": 0.0316,
+      "prediction_time_seconds": 0.007821
     },
     {
       "name": "svm_linear",
-      "accuracy": 0.9935,
-      "f1_weighted": 0.9904,
-      "cv_f1_mean": 0.9976,
-      "cv_f1_std": 0.0048,
-      "training_time_seconds": 0.1871,
-      "prediction_time_seconds": 0.014702
+      "accuracy": 0.9954,
+      "f1_weighted": 0.9931,
+      "cv_f1_mean": 0.9983,
+      "cv_f1_std": 0.0034,
+      "training_time_seconds": 0.1304,
+      "prediction_time_seconds": 0.0121
     }
   ],
   "classification_report": {
@@ -63,37 +63,31 @@
       "precision": 1.0,
       "recall": 1.0,
       "f1-score": 1.0,
-      "support": 39.0
+      "support": 52.0
     },
     "Buy Gold & Defence Stocks | Avoid Equities": {
-      "precision": 0.9166666666666666,
+      "precision": 0.9523809523809523,
       "recall": 1.0,
-      "f1-score": 0.9565217391304348,
-      "support": 11.0
+      "f1-score": 0.975609756097561,
+      "support": 20.0
     },
     "Hold Cash | Defensive Stocks": {
       "precision": 1.0,
       "recall": 1.0,
       "f1-score": 1.0,
-      "support": 14.0
+      "support": 18.0
     },
     "Hold Gold | Avoid High-Risk Equities": {
       "precision": 1.0,
       "recall": 1.0,
       "f1-score": 1.0,
-      "support": 2.0
+      "support": 3.0
     },
     "Market Neutral | Hold Positions": {
       "precision": 1.0,
       "recall": 1.0,
       "f1-score": 1.0,
-      "support": 85.0
-    },
-    "Selective Equity Buy | Hold Gold": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 2.0
+      "support": 122.0
     },
     "Strong Buy: Gold, Oil & Energy Stocks | Avoid Equities": {
       "precision": 0.0,
@@ -101,18 +95,18 @@
       "f1-score": 0.0,
       "support": 1.0
     },
-    "accuracy": 0.9935064935064936,
+    "accuracy": 0.9953703703703703,
     "macro avg": {
-      "precision": 0.8452380952380951,
-      "recall": 0.8571428571428571,
-      "f1-score": 0.8509316770186335,
-      "support": 154.0
+      "precision": 0.8253968253968255,
+      "recall": 0.8333333333333334,
+      "f1-score": 0.8292682926829268,
+      "support": 216.0
     },
     "weighted avg": {
-      "precision": 0.9875541125541124,
-      "recall": 0.9935064935064936,
-      "f1-score": 0.9904009034443817,
-      "support": 154.0
+      "precision": 0.9909611992945325,
+      "recall": 0.9953703703703703,
+      "f1-score": 0.9931120144534779,
+      "support": 216.0
     }
   },
   "improvement_notes": [
