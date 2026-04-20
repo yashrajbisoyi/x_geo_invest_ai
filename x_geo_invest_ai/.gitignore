@@ -1,0 +1,7 @@
+.env
+venv/
+__pycache__/
+*.pyc
+data/improvements.db
+data/processed/live_runtime_news.csv
+data/processed/runtime_combined_news.csv

@@ -55,6 +55,11 @@ ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
 NEWSDATA_API_KEY = os.getenv("NEWSDATA_API_KEY") or os.getenv("NEWS_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_TIMEOUT_SECONDS = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "35"))
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "").strip()
+AI_BACKEND = os.getenv("AI_BACKEND", "auto").strip().lower()
+OLLAMA_TIMEOUT_SECONDS = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "180"))
 
 market_cache = {"data": None, "timestamp": 0, "debug": {}}
 x_news_cache = {"data": None, "timestamp": 0, "debug": {}}
@@ -347,6 +352,167 @@ def get_openai_api_key():
     return None
 
 
+def openai_responses_url():
+    return f"{OPENAI_BASE_URL}/responses"
+
+
+def ollama_chat_url():
+    return f"{OLLAMA_BASE_URL}/api/chat"
+
+
+def get_ai_backend():
+    backend = AI_BACKEND if AI_BACKEND in {"auto", "openai", "ollama"} else "auto"
+    if backend == "auto":
+        if OLLAMA_MODEL:
+            return "ollama"
+        if get_openai_api_key():
+            return "openai"
+        return "local"
+    return backend
+
+
+def generate_ollama_chat_answer(question, history=None, system_prompt=None):
+    if not OLLAMA_MODEL:
+        raise RuntimeError("OLLAMA_MODEL is missing. Set it in the environment to enable free local AI chat.")
+
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+
+    for item in (history or [])[-12:]:
+        role = "assistant" if item.get("role") == "assistant" else "user"
+        content = str(item.get("content") or "").strip()
+        if content:
+            messages.append({"role": role, "content": content})
+
+    messages.append({"role": "user", "content": str(question or "").strip()})
+
+    response = requests.post(
+        ollama_chat_url(),
+        json={
+            "model": OLLAMA_MODEL,
+            "messages": messages,
+            "stream": False,
+        },
+        timeout=OLLAMA_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    message = payload.get("message") or {}
+    answer = str(message.get("content") or "").strip()
+    if not answer:
+        raise RuntimeError("Local Ollama model returned an empty answer.")
+    return answer
+
+
+def local_market_snapshot():
+    data = dict(market_cache.get("data") or {})
+    debug = dict(market_cache.get("debug") or {})
+
+    missing_labels = [label for label in ("gold", "oil", "nifty", "sensex", "usdinr") if label not in data]
+    if missing_labels:
+        try:
+            fetched, fetched_debug = fetch_market_snapshot()
+            fx_rate, fx_attempts = fetch_usdinr_rate()
+            fetched["usdinr"] = fx_rate if fx_rate is not None else "Unavailable"
+            fetched_debug["fx"] = {
+                "ticker": "USDINR=X",
+                "status": "ok" if fx_rate is not None else "error",
+                "attempts": fx_attempts,
+            }
+            data.update(fetched)
+            debug.update(fetched_debug)
+        except Exception:
+            pass
+
+    data, debug = apply_market_fallbacks(data, debug)
+    return data, debug
+
+
+def format_market_value(value, unit=""):
+    if value in (None, "", "Unavailable"):
+        return "N/A"
+    try:
+        number = float(value)
+        return f"{number:,.2f}{unit}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def summarize_latest_news(records, limit=3):
+    items = []
+    for record in (records or [])[:limit]:
+        title = str(record.get("title") or "Untitled").strip()
+        risk = str(record.get("risk") or "Unknown").strip()
+        sentiment = str(record.get("sentiment") or "Unknown").strip()
+        source = str(record.get("source") or "Unknown").strip()
+        items.append(f"- {title} [{risk} risk, {sentiment}, source: {source}]")
+    return "\n".join(items)
+
+
+def fallback_geochat_answer(question, history=None):
+    text = str(question or "").strip()
+    normalized = normalize_country_name(text)
+    summary = dataset_summary(include_live=True)
+    latest_news = build_news_records(limit=5)
+    market_data, _ = local_market_snapshot()
+
+    if not normalized:
+        return "Please ask a more specific GeoFinance question."
+
+    greeting_terms = {"hi", "hello", "hey", "hola", "namaste"}
+    if normalized in greeting_terms or normalized.startswith("hi ") or normalized.startswith("hello "):
+        return (
+            "Hi, I am Bisoyi. I can still help in local GeoFinance mode with project questions, "
+            "market snapshot summaries, risk patterns, recent news, and dashboard guidance."
+        )
+
+    if any(word in normalized for word in ["market", "gold", "oil", "nifty", "sensex", "usd", "inr", "price"]):
+        return (
+            "Here is the current market snapshot available in this project:\n"
+            f"- Gold: {format_market_value(market_data.get('gold'), ' Rs./oz')}\n"
+            f"- Oil: {format_market_value(market_data.get('oil'), ' Rs./bbl')}\n"
+            f"- NIFTY 50: {format_market_value(market_data.get('nifty'), ' pts')}\n"
+            f"- SENSEX: {format_market_value(market_data.get('sensex'), ' pts')}\n"
+            f"- USD/INR: {format_market_value(market_data.get('usdinr'))}\n"
+            "If you want, ask me for an interpretation like bullish/bearish impact or safe-haven view."
+        )
+
+    if any(word in normalized for word in ["news", "headline", "latest", "risk", "sentiment", "recommendation"]):
+        risk_counts = summary.get("risk_counts", {})
+        sentiment_counts = summary.get("sentiment_counts", {})
+        rec_counts = summary.get("recommendation_counts", {})
+        top_recommendation = max(rec_counts, key=rec_counts.get) if rec_counts else "No recommendation data"
+        return (
+            "Here is a quick GeoFinance summary from your project dataset:\n"
+            f"- Total tracked articles: {summary.get('total_articles', 0)}\n"
+            f"- Risk mix: Low {risk_counts.get('Low', 0)}, Medium {risk_counts.get('Medium', 0)}, High {risk_counts.get('High', 0)}\n"
+            f"- Sentiment mix: Negative {sentiment_counts.get('Negative', 0)}, Neutral {sentiment_counts.get('Neutral', 0)}, Positive {sentiment_counts.get('Positive', 0)}\n"
+            f"- Most common recommendation: {top_recommendation}\n"
+            "Recent headlines:\n"
+            f"{summarize_latest_news(latest_news)}"
+        )
+
+    if any(word in normalized for word in ["dashboard", "project", "bot", "geofinance", "app", "feature"]):
+        return (
+            "This GeoFinance AI project already supports live news monitoring, risk classification, "
+            "sentiment analysis, investment recommendations, analytics views, and a dashboard bot. "
+            "A strong next step would be company search, better feed filters, or richer bot states."
+        )
+
+    if any(word in normalized for word in ["who are you", "what can you do", "help"]):
+        return (
+            "I am Bisoyi, the GeoFinance assistant in your dashboard. Right now I can answer best from "
+            "your local project context: markets, risk, news summaries, project features, and dashboard ideas. "
+            "For broader ChatGPT-style answers, add `OPENAI_API_KEY` on the server."
+        )
+
+    return (
+        "I can answer GeoFinance and project-related questions right now using the data already inside this app. "
+        "For broad general questions like ChatGPT, this project still needs your own `OPENAI_API_KEY` in the environment."
+    )
+
+
 def fallback_problem_solution(problem, problem_type, urgency):
     urgency_line = {
         "today": "Create a same-day fix checklist and validate with 3 real users before close of day.",
@@ -363,13 +529,36 @@ def fallback_problem_solution(problem, problem_type, urgency):
     }
 
 
+def geochat_system_prompt():
+    return (
+        "You are Bisoyi, a warm, human-like AI assistant inside a GeoFinance dashboard. "
+        "Chat naturally and interactively, like a helpful everyday assistant. "
+        "You should handle casual conversation such as greetings, feelings, small talk, "
+        "general knowledge, study help, writing help, brainstorming, and everyday questions. "
+        "When the topic is finance, markets, geopolitics, macroeconomics, risk, or investing, "
+        "be especially strong and practical. Keep answers clear, friendly, easy to follow, and usually concise. "
+        "Default to short helpful replies unless the user asks for detail. "
+        "For simple messages like 'hi' or 'how are you', reply casually instead of sounding formal. "
+        "Avoid abusive content, and do not guarantee financial returns or pretend certainty where it is not justified."
+    )
+
+
 def generate_geochat_answer(question, history=None):
     text = str(question or "").strip()
-    if len(text) < 6:
-        raise ValueError("Please ask a meaningful question.")
+    if len(text) < 1:
+        raise ValueError("Please enter a question.")
+    backend = get_ai_backend()
+    if backend == "local":
+        return fallback_geochat_answer(text, history=history)
+
+    system_prompt = geochat_system_prompt()
+
+    if backend == "ollama":
+        return generate_ollama_chat_answer(text, history=history, system_prompt=system_prompt)
+
     openai_api_key = get_openai_api_key()
     if not openai_api_key:
-        raise RuntimeError("OpenAI key is missing. Set OPENAI_API_KEY (or OPENAI_KEY) in environment variables.")
+        return fallback_geochat_answer(text, history=history)
 
     previous_messages = []
     for item in (history or [])[-12:]:
@@ -380,19 +569,12 @@ def generate_geochat_answer(question, history=None):
                 {"role": role, "content": [{"type": "input_text", "text": content}]}
             )
 
-    system_prompt = (
-        "You are Bisoyi, an assistant that is strongest in geopolitics, macroeconomics, "
-        "financial markets, risk, and investment education, but you can answer general "
-        "knowledge questions too. Provide clear, practical, concise answers. Avoid abusive "
-        "content and avoid guaranteeing financial outcomes; use educational framing."
-    )
-
     messages = [{"role": "system", "content": [{"type": "input_text", "text": system_prompt}]}]
     messages.extend(previous_messages)
     messages.append({"role": "user", "content": [{"type": "input_text", "text": text}]})
 
     response = requests.post(
-        "https://api.openai.com/v1/responses",
+        openai_responses_url(),
         headers={
             "Authorization": f"Bearer {openai_api_key}",
             "Content-Type": "application/json",
@@ -416,10 +598,9 @@ def generate_geochat_answer(question, history=None):
 
 
 def generate_problem_solution(problem, problem_type, urgency, history=None):
-    openai_api_key = get_openai_api_key()
-    if not openai_api_key:
+    backend = get_ai_backend()
+    if backend == "local":
         raise RuntimeError("OPENAI_API_KEY is missing. Add it in environment variables to enable AI answers.")
-
     system_prompt = (
         "You are a practical GeoFinance and product problem-solving assistant. "
         "Return valid JSON only with keys: headline, root_cause, immediate_actions, "
@@ -440,8 +621,31 @@ def generate_problem_solution(problem, problem_type, urgency, history=None):
         "Provide realistic, implementation-focused guidance."
     )
 
+    if backend == "ollama":
+        text = generate_ollama_chat_answer(user_prompt, history=None, system_prompt=system_prompt)
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.IGNORECASE | re.DOTALL).strip()
+        try:
+            parsed = json.loads(cleaned)
+        except json.JSONDecodeError:
+            return fallback_problem_solution(problem, problem_type, urgency)
+        if not isinstance(parsed, dict):
+            return fallback_problem_solution(problem, problem_type, urgency)
+        return {
+            "headline": str(parsed.get("headline") or "").strip() or fallback_problem_solution(problem, problem_type, urgency)["headline"],
+            "root_cause": str(parsed.get("root_cause") or "").strip() or fallback_problem_solution(problem, problem_type, urgency)["root_cause"],
+            "immediate_actions": str(parsed.get("immediate_actions") or "").strip() or fallback_problem_solution(problem, problem_type, urgency)["immediate_actions"],
+            "next_milestone": str(parsed.get("next_milestone") or "").strip() or fallback_problem_solution(problem, problem_type, urgency)["next_milestone"],
+            "success_metric": str(parsed.get("success_metric") or "").strip() or fallback_problem_solution(problem, problem_type, urgency)["success_metric"],
+        }
+
+    openai_api_key = get_openai_api_key()
+    if not openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY is missing. Add it in environment variables to enable AI answers.")
+
     response = requests.post(
-        "https://api.openai.com/v1/responses",
+        openai_responses_url(),
         headers={
             "Authorization": f"Bearer {openai_api_key}",
             "Content-Type": "application/json",
