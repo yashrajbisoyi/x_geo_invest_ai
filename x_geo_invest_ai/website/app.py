@@ -379,7 +379,7 @@ def generate_ollama_chat_answer(question, history=None, system_prompt=None):
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
 
-    for item in (history or [])[-12:]:
+    for item in (history or [])[-3:]:
         role = "assistant" if item.get("role") == "assistant" else "user"
         content = str(item.get("content") or "").strip()
         if content:
@@ -458,13 +458,13 @@ def fallback_geochat_answer(question, history=None):
     market_data, _ = local_market_snapshot()
 
     if not normalized:
-        return "Please ask a more specific GeoFinance question 🙂"
+        return "Ask me something a little more specific 🙂 I like good questions."
 
     greeting_terms = {"hi", "hello", "hey", "hola", "namaste"}
     if normalized in greeting_terms or normalized.startswith("hi ") or normalized.startswith("hello "):
         return (
-            "Hi, I am Bisoyi 🙂 I can still help in local GeoFinance mode with project questions, "
-            "market snapshot summaries, risk patterns, recent news, and dashboard guidance."
+            "Hi, I am Bisoyi 🙂 Sharp, calm, and slightly dramatic when needed. "
+            "I can help in local GeoFinance mode with project questions, market snapshots, risk patterns, recent news, and dashboard guidance."
         )
 
     if any(word in normalized for word in ["market", "gold", "oil", "nifty", "sensex", "usd", "inr", "price"]):
@@ -497,12 +497,12 @@ def fallback_geochat_answer(question, history=None):
         return (
             "This GeoFinance AI project already supports live news monitoring, risk classification, "
             "sentiment analysis, investment recommendations, analytics views, and a dashboard bot. "
-            "A strong next step would be company search, better feed filters, or richer bot states 🚀"
+            "A strong next step would be company search, better feed filters, or richer bot states 🚀 Clean moves only."
         )
 
     if any(word in normalized for word in ["who are you", "what can you do", "help"]):
         return (
-            "I am Bisoyi, the GeoFinance assistant in your dashboard 🙂 Right now I can answer best from "
+            "I am Bisoyi, the GeoFinance assistant in your dashboard 🙂 A little classy, a little sassy, and very useful. Right now I can answer best from "
             "your local project context: markets, risk, news summaries, project features, and dashboard ideas. "
             "For broader ChatGPT-style answers, add `OPENAI_API_KEY` on the server."
         )
@@ -531,15 +531,12 @@ def fallback_problem_solution(problem, problem_type, urgency):
 
 def geochat_system_prompt():
     return (
-        "You are Bisoyi, a warm, human-like AI assistant inside a GeoFinance dashboard. "
-        "Chat naturally and interactively, like a helpful everyday assistant. "
-        "You should handle casual conversation such as greetings, feelings, small talk, "
-        "general knowledge, study help, writing help, brainstorming, and everyday questions. "
-        "When the topic is finance, markets, geopolitics, macroeconomics, risk, or investing, "
-        "be especially strong and practical. Keep answers clear, friendly, easy to follow, and usually concise. "
-        "Default to short helpful replies unless the user asks for detail. "
-        "For simple messages like 'hi' or 'how are you', reply casually instead of sounding formal. "
-        "Use light, friendly emojis naturally in conversation to feel warm and human, but keep them occasional and not excessive. "
+        "You are Bisoyi, a warm, smart, playful AI assistant inside a GeoFinance dashboard. "
+        "Be friendly, slightly witty, and lightly sassy in a charming way. "
+        "Handle everyday chat naturally, and be especially strong on finance, markets, geopolitics, macro, risk, and investing. "
+        "Keep replies very short, sharp, and helpful by default unless the user asks for detail. "
+        "Use occasional emojis for warmth, not spam. "
+        "For serious finance or risk topics, stay crisp, credible, and professional. "
         "Avoid abusive content, and do not guarantee financial returns or pretend certainty where it is not justified."
     )
 
@@ -562,7 +559,7 @@ def generate_geochat_answer(question, history=None):
         return fallback_geochat_answer(text, history=history)
 
     previous_messages = []
-    for item in (history or [])[-12:]:
+    for item in (history or [])[-3:]:
         role = "assistant" if item.get("role") == "assistant" else "user"
         content = str(item.get("content") or "").strip()
         if content:
@@ -582,7 +579,7 @@ def generate_geochat_answer(question, history=None):
         },
         json={
             "model": OPENAI_MODEL,
-            "temperature": 0.5,
+            "temperature": 0.2,
             "input": messages,
         },
         timeout=OPENAI_TIMEOUT_SECONDS,
