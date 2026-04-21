@@ -458,24 +458,24 @@ def fallback_geochat_answer(question, history=None):
     market_data, _ = local_market_snapshot()
 
     if not normalized:
-        return "Please ask a more specific GeoFinance question."
+        return "Please ask a more specific GeoFinance question 🙂"
 
     greeting_terms = {"hi", "hello", "hey", "hola", "namaste"}
     if normalized in greeting_terms or normalized.startswith("hi ") or normalized.startswith("hello "):
         return (
-            "Hi, I am Bisoyi. I can still help in local GeoFinance mode with project questions, "
+            "Hi, I am Bisoyi 🙂 I can still help in local GeoFinance mode with project questions, "
             "market snapshot summaries, risk patterns, recent news, and dashboard guidance."
         )
 
     if any(word in normalized for word in ["market", "gold", "oil", "nifty", "sensex", "usd", "inr", "price"]):
         return (
-            "Here is the current market snapshot available in this project:\n"
+            "Here is the current market snapshot available in this project 📊\n"
             f"- Gold: {format_market_value(market_data.get('gold'), ' Rs./oz')}\n"
             f"- Oil: {format_market_value(market_data.get('oil'), ' Rs./bbl')}\n"
             f"- NIFTY 50: {format_market_value(market_data.get('nifty'), ' pts')}\n"
             f"- SENSEX: {format_market_value(market_data.get('sensex'), ' pts')}\n"
             f"- USD/INR: {format_market_value(market_data.get('usdinr'))}\n"
-            "If you want, ask me for an interpretation like bullish/bearish impact or safe-haven view."
+            "If you want, ask me for an interpretation like bullish/bearish impact or safe-haven view 😊"
         )
 
     if any(word in normalized for word in ["news", "headline", "latest", "risk", "sentiment", "recommendation"]):
@@ -484,7 +484,7 @@ def fallback_geochat_answer(question, history=None):
         rec_counts = summary.get("recommendation_counts", {})
         top_recommendation = max(rec_counts, key=rec_counts.get) if rec_counts else "No recommendation data"
         return (
-            "Here is a quick GeoFinance summary from your project dataset:\n"
+            "Here is a quick GeoFinance summary from your project dataset 📌\n"
             f"- Total tracked articles: {summary.get('total_articles', 0)}\n"
             f"- Risk mix: Low {risk_counts.get('Low', 0)}, Medium {risk_counts.get('Medium', 0)}, High {risk_counts.get('High', 0)}\n"
             f"- Sentiment mix: Negative {sentiment_counts.get('Negative', 0)}, Neutral {sentiment_counts.get('Neutral', 0)}, Positive {sentiment_counts.get('Positive', 0)}\n"
@@ -497,18 +497,18 @@ def fallback_geochat_answer(question, history=None):
         return (
             "This GeoFinance AI project already supports live news monitoring, risk classification, "
             "sentiment analysis, investment recommendations, analytics views, and a dashboard bot. "
-            "A strong next step would be company search, better feed filters, or richer bot states."
+            "A strong next step would be company search, better feed filters, or richer bot states 🚀"
         )
 
     if any(word in normalized for word in ["who are you", "what can you do", "help"]):
         return (
-            "I am Bisoyi, the GeoFinance assistant in your dashboard. Right now I can answer best from "
+            "I am Bisoyi, the GeoFinance assistant in your dashboard 🙂 Right now I can answer best from "
             "your local project context: markets, risk, news summaries, project features, and dashboard ideas. "
             "For broader ChatGPT-style answers, add `OPENAI_API_KEY` on the server."
         )
 
     return (
-        "I can answer GeoFinance and project-related questions right now using the data already inside this app. "
+        "I can answer GeoFinance and project-related questions right now using the data already inside this app 🙂 "
         "For broad general questions like ChatGPT, this project still needs your own `OPENAI_API_KEY` in the environment."
     )
 
@@ -539,6 +539,7 @@ def geochat_system_prompt():
         "be especially strong and practical. Keep answers clear, friendly, easy to follow, and usually concise. "
         "Default to short helpful replies unless the user asks for detail. "
         "For simple messages like 'hi' or 'how are you', reply casually instead of sounding formal. "
+        "Use light, friendly emojis naturally in conversation to feel warm and human, but keep them occasional and not excessive. "
         "Avoid abusive content, and do not guarantee financial returns or pretend certainty where it is not justified."
     )
 
